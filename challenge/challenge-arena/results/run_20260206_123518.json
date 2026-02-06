@@ -1,0 +1,27 @@
+{
+  "run_id": "run_20260206_123518",
+  "model": "gemini",
+  "obstacles": false,
+  "timeout": 5,
+  "started_at": "2026-02-06T12:35:18.197209",
+  "tests": [
+    {
+      "type": "visible",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=visible&obstacles=0",
+      "agent_success": false,
+      "server_verified": false,
+      "difficulty": "easy",
+      "steps": 0,
+      "wall_time_s": 0,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_total": 0,
+      "cost": 0.0,
+      "api_calls": 0,
+      "exit_code": 1,
+      "elapsed_s": 0.1
+    }
+  ],
+  "finished_at": "2026-02-06T12:35:18.289694"
+}

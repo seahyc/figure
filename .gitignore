@@ -1,0 +1,18 @@
+# Run outputs (contains screenshots, logs, LLM traces)
+runs/
+
+# Python
+__pycache__/
+*.py[oc]
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment variables
+.env
+.env.local
+
+# OS
+.DS_Store

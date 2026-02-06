@@ -1,0 +1,63 @@
+{
+  "run_id": "run_20260206_204702",
+  "model": "gemini",
+  "obstacles": false,
+  "timeout": 180,
+  "started_at": "2026-02-06T20:47:02.254388",
+  "tests": [
+    {
+      "type": "shadow_dom",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=shadow_dom&obstacles=0",
+      "agent_success": false,
+      "server_verified": false,
+      "difficulty": "expert",
+      "exit_code": -1,
+      "elapsed_s": 180,
+      "error": "Timed out after 180s",
+      "steps": 0,
+      "wall_time_s": 180,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_total": 0,
+      "cost": 0.0,
+      "api_calls": 0
+    },
+    {
+      "type": "keyboard_sequence",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=keyboard_sequence&obstacles=0",
+      "agent_success": false,
+      "server_verified": true,
+      "difficulty": "hard",
+      "steps": 32,
+      "wall_time_s": 146.1,
+      "tokens_in": 394832,
+      "tokens_out": 9437,
+      "tokens_total": 404269,
+      "cost": 0.0,
+      "api_calls": 32,
+      "exit_code": 0,
+      "elapsed_s": 150.1
+    },
+    {
+      "type": "hover_reveal",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=hover_reveal&obstacles=0",
+      "agent_success": false,
+      "server_verified": true,
+      "difficulty": "medium",
+      "exit_code": -1,
+      "elapsed_s": 180,
+      "error": "Timed out after 180s",
+      "steps": 0,
+      "wall_time_s": 180,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_total": 0,
+      "cost": 0.0,
+      "api_calls": 0
+    }
+  ],
+  "finished_at": "2026-02-06T20:55:32.544295"
+}

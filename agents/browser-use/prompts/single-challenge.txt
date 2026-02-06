@@ -1,0 +1,14 @@
+Complete the current challenge step. Find the code and submit it.
+
+RULES:
+1. Find the 6-character code on the page (visible, hidden, revealed by clicking, scrolling, hovering, etc.)
+2. Input the code and click "Submit Code"
+3. Call done(success=True) immediately after successful submission
+4. If stuck after 3 attempts, call done(success=False)
+
+TIPS:
+- Use search_dom to find hidden elements: evaluate("window.__skills.search_dom({text: 'code'})")
+- For hover challenges: hover(index=N), wait for reveal
+- For keyboard: send_keys("ArrowUp ArrowDown Enter")
+- For drag-drop: drag(source=N, target=M)
+- For canvas: draw(index=N, strokes=3)

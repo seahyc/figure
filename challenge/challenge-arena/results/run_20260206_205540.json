@@ -1,0 +1,62 @@
+{
+  "run_id": "run_20260206_205540",
+  "model": "gemini",
+  "obstacles": false,
+  "timeout": 180,
+  "started_at": "2026-02-06T20:55:40.209874",
+  "tests": [
+    {
+      "type": "sequence",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=sequence&obstacles=0",
+      "agent_success": false,
+      "server_verified": true,
+      "difficulty": "hard",
+      "exit_code": -1,
+      "elapsed_s": 180,
+      "error": "Timed out after 180s",
+      "steps": 0,
+      "wall_time_s": 180,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_total": 0,
+      "cost": 0.0,
+      "api_calls": 0
+    },
+    {
+      "type": "puzzle_solve",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=puzzle_solve&obstacles=0",
+      "agent_success": false,
+      "server_verified": true,
+      "difficulty": "hard",
+      "steps": 20,
+      "wall_time_s": 85.7,
+      "tokens_in": 223190,
+      "tokens_out": 4892,
+      "tokens_total": 228082,
+      "cost": 0.0,
+      "api_calls": 20,
+      "exit_code": 0,
+      "elapsed_s": 91.1
+    },
+    {
+      "type": "calculated",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=calculated&obstacles=0",
+      "agent_success": false,
+      "server_verified": true,
+      "difficulty": "medium",
+      "steps": 28,
+      "wall_time_s": 160.7,
+      "tokens_in": 350075,
+      "tokens_out": 7013,
+      "tokens_total": 357088,
+      "cost": 0.0,
+      "api_calls": 28,
+      "exit_code": 0,
+      "elapsed_s": 164.7
+    }
+  ],
+  "finished_at": "2026-02-06T21:02:56.127153"
+}

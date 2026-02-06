@@ -1,0 +1,28 @@
+{
+  "run_id": "run_20260206_202934",
+  "model": "gemini",
+  "obstacles": false,
+  "timeout": 300,
+  "started_at": "2026-02-06T20:29:34.403148",
+  "tests": [
+    {
+      "type": "shadow_dom",
+      "step": null,
+      "url": "http://127.0.0.1:8765/?type=shadow_dom&obstacles=0",
+      "agent_success": false,
+      "server_verified": false,
+      "difficulty": "expert",
+      "exit_code": -1,
+      "elapsed_s": 300,
+      "error": "Timed out after 300s",
+      "steps": 0,
+      "wall_time_s": 300,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "tokens_total": 0,
+      "cost": 0.0,
+      "api_calls": 0
+    }
+  ],
+  "finished_at": "2026-02-06T20:34:39.444421"
+}
