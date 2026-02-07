@@ -110,6 +110,23 @@ class ChatMessage(BaseModel):
             return str(self.content)
 
 
+class ResponseFormatJsonSchema(BaseModel):
+    """JSON schema definition for structured output."""
+
+    name: str = Field(..., description="Schema name")
+    strict: Optional[bool] = Field(None, description="Whether to enforce strict schema compliance")
+    schema_: Optional[Dict[str, Any]] = Field(None, alias="schema", description="The JSON schema")
+
+    model_config = {"populate_by_name": True}
+
+
+class ResponseFormat(BaseModel):
+    """Response format specification (OpenAI compatible)."""
+
+    type: str = Field(..., description="Response format type: 'text', 'json_object', or 'json_schema'")
+    json_schema: Optional[ResponseFormatJsonSchema] = Field(None, description="JSON schema when type='json_schema'")
+
+
 class ChatCompletionRequest(BaseModel):
     """Chat completion request model."""
 
@@ -149,6 +166,9 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: Optional[Union[str, ToolChoice]] = Field(
         None,
         description="Tool choice preference (e.g. 'auto', 'none', or a specific tool)",
+    )
+    response_format: Optional[ResponseFormat] = Field(
+        None, description="Response format: 'text', 'json_object', or 'json_schema'"
     )
 
     # Extension fields for Claude Code

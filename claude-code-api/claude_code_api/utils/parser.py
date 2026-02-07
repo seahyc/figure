@@ -325,6 +325,52 @@ class MessageAggregator:
         self.parser.reset()
 
 
+def extract_json_from_response(content: str) -> str:
+    """Extract valid JSON from Claude's response.
+
+    Claude may wrap JSON in markdown fences or add preamble text.
+    This extracts the JSON object/array from the response.
+    Returns the original content if no JSON is found.
+    """
+    if not content:
+        return content
+
+    stripped = content.strip()
+
+    # Already valid JSON — fast path
+    if stripped.startswith(("{", "[")):
+        try:
+            json.loads(stripped)
+            return stripped
+        except json.JSONDecodeError:
+            pass
+
+    # Try extracting from markdown code fences: ```json ... ``` or ``` ... ```
+    import re
+    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", stripped, re.DOTALL)
+    if fence_match:
+        candidate = fence_match.group(1).strip()
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    # Try finding the first { ... } or [ ... ] block (greedy from first to last)
+    for open_ch, close_ch in [("{", "}"), ("[", "]")]:
+        first = stripped.find(open_ch)
+        last = stripped.rfind(close_ch)
+        if first != -1 and last > first:
+            candidate = stripped[first : last + 1]
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                pass
+
+    return content
+
+
 def sanitize_content(content: str) -> str:
     """Sanitize content for safe transmission."""
     if not content:

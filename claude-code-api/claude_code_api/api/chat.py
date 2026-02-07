@@ -25,6 +25,7 @@ from claude_code_api.utils.parser import (
     ClaudeOutputParser,
     OpenAIConverter,
     estimate_tokens,
+    extract_json_from_response,
     normalize_claude_message,
 )
 from claude_code_api.utils.streaming import (
@@ -149,6 +150,29 @@ def _extract_full_content(request: ChatCompletionRequest):
         else request.system_prompt
     )
 
+    # Handle response_format (OpenAI JSON schema structured output)
+    # browser-use sends response_format={type:"json_schema", json_schema:{name, schema}}
+    # We inject the schema into the system prompt so Claude returns valid JSON
+    if request.response_format and request.response_format.type in ("json_schema", "json_object"):
+        rf = request.response_format
+        if rf.type == "json_schema" and rf.json_schema:
+            schema_obj = rf.json_schema.schema_ or {}
+            schema_name = rf.json_schema.name or "output"
+            schema_json = json.dumps(schema_obj, indent=2)
+            schema_addendum = (
+                f"\n\nYou MUST respond with ONLY a valid JSON object matching the '{schema_name}' schema below. "
+                f"Do NOT wrap the JSON in markdown code fences. Do NOT include any text before or after the JSON. "
+                f"Use the EXACT field names from the schema — do NOT rename, abbreviate, or add fields.\n\n"
+                f"Required JSON Schema:\n{schema_json}"
+            )
+            system_prompt = (system_prompt or "") + schema_addendum
+        elif rf.type == "json_object":
+            schema_addendum = (
+                "\n\nYou MUST respond with ONLY a valid JSON object. "
+                "Do NOT wrap the JSON in markdown code fences. Do NOT include any text before or after the JSON."
+            )
+            system_prompt = (system_prompt or "") + schema_addendum
+
     # If tools are provided, append their schemas to the system prompt
     # so Claude CLI knows the exact structured output format
     if request.tools:
@@ -209,6 +233,7 @@ async def _collect_non_streaming_response(
     session_id: str,
     model: str,
     project_id: str,
+    json_mode: bool = False,
 ) -> Dict[str, Any]:
     messages, parser = await _gather_claude_messages(claude_process)
     _log_message_summary(messages)
@@ -221,6 +246,16 @@ async def _collect_non_streaming_response(
     response = _build_non_streaming_response(
         messages, session_id, model, usage_summary, project_id
     )
+
+    # Post-process: extract JSON when response_format requires it
+    if json_mode:
+        choices = response.get("choices", [])
+        if choices:
+            msg = choices[0].get("message", {})
+            content = msg.get("content")
+            if content:
+                msg["content"] = extract_json_from_response(content)
+
     _log_response_payload(response)
     return response
 
@@ -443,10 +478,19 @@ async def create_chat_completion(request: ChatCompletionRequest, req: Request) -
             tokens_used=estimate_tokens(user_prompt),
         )
 
+        # Determine if we need JSON extraction on the response
+        json_mode = bool(
+            request.response_format
+            and request.response_format.type in ("json_schema", "json_object")
+        )
+
         # Handle streaming vs non-streaming
         if request.stream:
             return StreamingResponse(
-                create_sse_response(api_session_id, response_model, claude_process),
+                create_sse_response(
+                    api_session_id, response_model, claude_process,
+                    json_mode=json_mode,
+                ),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -463,6 +507,7 @@ async def create_chat_completion(request: ChatCompletionRequest, req: Request) -
             session_id=api_session_id,
             model=response_model,
             project_id=project_id,
+            json_mode=json_mode,
         )
 
     except HTTPException:

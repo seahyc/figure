@@ -13,6 +13,7 @@ from claude_code_api.core.claude_manager import ClaudeProcess
 from claude_code_api.utils.parser import (
     ClaudeOutputParser,
     OpenAIConverter,
+    extract_json_from_response,
     normalize_claude_message,
     tool_use_to_openai_call,
 )
@@ -318,14 +319,72 @@ streaming_manager = StreamingManager()
 
 
 async def create_sse_response(
-    session_id: str, model: str, claude_process: ClaudeProcess
+    session_id: str, model: str, claude_process: ClaudeProcess,
+    json_mode: bool = False,
 ) -> AsyncGenerator[str, None]:
-    """Create SSE response for Claude Code output."""
+    """Create SSE response for Claude Code output.
+
+    When json_mode is True, buffers the full response, extracts valid JSON,
+    and re-emits it as a single content chunk.  This is needed because Claude
+    may wrap JSON in markdown fences or add preamble text.
+    """
     try:
-        async for chunk in streaming_manager.create_stream(
-            session_id, model, claude_process
-        ):
-            yield chunk
+        if not json_mode:
+            async for chunk in streaming_manager.create_stream(
+                session_id, model, claude_process
+            ):
+                yield chunk
+        else:
+            # Buffer all chunks, extract JSON, re-emit
+            buffered_content = []
+            completion_id = f"chatcmpl-{uuid.uuid4().hex[:29]}"
+            created = utc_timestamp()
+
+            # Send initial role chunk
+            yield SSEFormatter.format_event({
+                "id": completion_id,
+                "object": CHUNK_OBJECT_TYPE,
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
+            })
+
+            # Collect all content from Claude
+            converter = OpenAIStreamConverter(model, session_id)
+            async for claude_message in claude_process.get_output():
+                message = normalize_claude_message(claude_message)
+                if not message:
+                    continue
+                converter.parser.parse_message(message)
+                if converter.parser.is_assistant_message(message):
+                    text = converter.parser.extract_text_content(message).strip()
+                    if text:
+                        buffered_content.append(text)
+                if converter.parser.is_final_message(message):
+                    break
+
+            # Extract JSON and emit as single chunk
+            full_content = "\n".join(buffered_content).strip()
+            if full_content:
+                extracted = extract_json_from_response(full_content)
+                yield SSEFormatter.format_event({
+                    "id": completion_id,
+                    "object": CHUNK_OBJECT_TYPE,
+                    "created": created,
+                    "model": model,
+                    "choices": [{"index": 0, "delta": {"content": extracted}, "finish_reason": None}],
+                })
+
+            # Final chunk + DONE
+            yield SSEFormatter.format_event({
+                "id": completion_id,
+                "object": CHUNK_OBJECT_TYPE,
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            })
+            yield SSEFormatter.format_completion()
+
     except Exception as e:
         logger.error(
             "SSE response error", session_id=session_id, error=str(e), exc_info=True
