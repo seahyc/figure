@@ -768,9 +768,12 @@ async def pre_step_cleanup(agent):
         # down steps that pre_solve already handled.
         if first_result and "AUTO-SUBMITTED" not in str(first_result):
             await asyncio.sleep(3.5)
-            await page.evaluate("""() => {
-                if (window.__skills && window.__skills.pre_solve) window.__skills.pre_solve();
+            second_result = await page.evaluate("""() => {
+                if (window.__skills && window.__skills.pre_solve) return window.__skills.pre_solve();
+                return 'no_pre_solve';
             }""")
+            if second_result and "AUTO-SUBMITTED" in str(second_result):
+                print(f"[pre_step_cleanup] Phase 2 result: {str(second_result)[:120]}")
 
         # Phase 3: DOM cleanup and metadata injection
         await page.evaluate("""() => {

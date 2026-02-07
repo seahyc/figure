@@ -342,15 +342,38 @@ function(options) {
 
     // Source 10: React fiber state extraction (universal — works for all challenge types)
     // The live site is a React app — challenge codes are stored in component state.
-    // Walk up the React fiber tree from a challenge-specific element to find 6-char codes.
-    // This works for ALL challenge types including drag_drop, gesture, memory, etc.
+    // Walk the React fiber tree to find the challenge component (Gv) with matching stepNum.
+    // Uses step-matching to avoid stale codes from previous steps after SPA transitions.
     (function() {
-      // Find a starting element INSIDE the current challenge box
-      // The challenge box is a colored container with border inside .max-w-6xl
+      // Detect current step from page text
+      var pageText = document.body ? document.body.innerText : '';
+      var stepMatch = pageText.match(/step\s+(\d+)\s*(?:of|\/)\s*(\d+)/i);
+      var currentStep = stepMatch ? parseInt(stepMatch[1]) : null;
+
+      // Helper: extract 6-char codes from a fiber's memoizedState chain
+      function extractCodes(fiber) {
+        var codes = [];
+        if (!fiber || !fiber.memoizedState) return codes;
+        var state = fiber.memoizedState;
+        var depth = 0;
+        while (state && depth < 10) {
+          if (typeof state.memoizedState === 'string' && codePattern.test(state.memoizedState)) {
+            if (codes.indexOf(state.memoizedState) === -1) codes.push(state.memoizedState);
+          }
+          if (state.queue && typeof state.queue.lastRenderedState === 'string' &&
+              codePattern.test(state.queue.lastRenderedState)) {
+            if (codes.indexOf(state.queue.lastRenderedState) === -1) codes.push(state.queue.lastRenderedState);
+          }
+          state = state.next;
+          depth++;
+        }
+        return codes;
+      }
+
+      // Strategy A: Walk UP from challenge element (fast, works when DOM is fresh)
       var challengeArea = document.querySelector('.max-w-6xl') || document.querySelector('main');
       var startEl = null;
       if (challengeArea) {
-        // Try specific challenge elements first, then generic containers
         startEl = challengeArea.querySelector('[class*="bg-indigo"]') ||
                   challengeArea.querySelector('[class*="bg-green"]') ||
                   challengeArea.querySelector('[class*="bg-blue"]') ||
@@ -365,35 +388,71 @@ function(options) {
                   challengeArea.querySelector('[class*="border-2"]') ||
                   challengeArea.querySelector('strong');
       }
-      if (!startEl) return;
-      var fiberKey = Object.keys(startEl).find(function(k) { return k.indexOf('__reactFiber') === 0; });
-      if (!fiberKey) return;
-      var fiber = startEl[fiberKey];
+
       var reactCodes = [];
-      for (var i = 0; i < 30 && fiber; i++) {
-        if (fiber.memoizedState) {
-          var state = fiber.memoizedState;
-          var depth = 0;
-          while (state && depth < 10) {
-            if (typeof state.memoizedState === 'string' && codePattern.test(state.memoizedState)) {
-              if (reactCodes.indexOf(state.memoizedState) === -1) {
-                reactCodes.push(state.memoizedState);
+      if (startEl) {
+        var fiberKey = Object.keys(startEl).find(function(k) { return k.indexOf('__reactFiber') === 0; });
+        if (fiberKey) {
+          var fiber = startEl[fiberKey];
+          for (var i = 0; i < 30 && fiber; i++) {
+            // Check if this is the challenge component with matching step
+            var props = fiber.memoizedProps;
+            if (props && props.config && typeof props.stepNum === 'number') {
+              // Step-match: only use code if stepNum matches current page step
+              if (currentStep === null || props.stepNum === currentStep) {
+                var codes = extractCodes(fiber);
+                for (var ci = 0; ci < codes.length; ci++) {
+                  if (reactCodes.indexOf(codes[ci]) === -1) reactCodes.push(codes[ci]);
+                }
               }
+              break; // Found the challenge component, stop walking
             }
-            if (state.queue && typeof state.queue.lastRenderedState === 'string' &&
-                codePattern.test(state.queue.lastRenderedState)) {
-              if (reactCodes.indexOf(state.queue.lastRenderedState) === -1) {
-                reactCodes.push(state.queue.lastRenderedState);
-              }
+            // Also check generic state (for non-challenge components)
+            var genCodes = extractCodes(fiber);
+            for (var gi = 0; gi < genCodes.length; gi++) {
+              if (reactCodes.indexOf(genCodes[gi]) === -1) reactCodes.push(genCodes[gi]);
             }
-            state = state.next;
-            depth++;
+            fiber = fiber.return;
           }
         }
-        fiber = fiber.return;
       }
+
+      // Strategy B: If walk-up found nothing (or only stale codes), walk DOWN from #root
+      // This catches cases where the DOM element is stale but the fiber tree has updated
+      if (reactCodes.length === 0 || (allSubmittedCodes.length > 0 &&
+          reactCodes.every(function(c) { return allSubmittedCodes.indexOf(c) !== -1; }))) {
+        var rootEl = document.getElementById('root') || document.getElementById('__next');
+        if (rootEl) {
+          var rootKey = Object.keys(rootEl).find(function(k) {
+            return k.indexOf('__reactFiber') === 0 || k.indexOf('__reactContainer') === 0;
+          });
+          if (rootKey) {
+            var stack = [rootEl[rootKey]];
+            var visited = 0;
+            while (stack.length > 0 && visited < 2000) {
+              var f = stack.pop();
+              if (!f) continue;
+              visited++;
+              // Look for challenge component with matching stepNum
+              var fp = f.memoizedProps;
+              if (fp && fp.config && typeof fp.stepNum === 'number') {
+                if (currentStep === null || fp.stepNum === currentStep) {
+                  var rootCodes = extractCodes(f);
+                  for (var rci = 0; rci < rootCodes.length; rci++) {
+                    if (reactCodes.indexOf(rootCodes[rci]) === -1) {
+                      reactCodes.push(rootCodes[rci]);
+                    }
+                  }
+                }
+              }
+              if (f.child) stack.push(f.child);
+              if (f.sibling) stack.push(f.sibling);
+            }
+          }
+        }
+      }
+
       // Add React codes at END — DOM-visible codes from Sources 1-9 should take priority
-      // For challenges like memory, the DOM-visible code is correct while React state may be stale
       for (var ri = 0; ri < reactCodes.length; ri++) {
         if (foundCodes.indexOf(reactCodes[ri]) === -1) {
           foundCodes.push(reactCodes[ri]);
