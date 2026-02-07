@@ -725,6 +725,8 @@ Input field: look for placeholder "Enter 6-character code" if #code-input doesn'
 
 
 _step_timings = []  # [(step_num, phase, duration_ms), ...]
+_last_page_url = None
+_same_url_count = 0
 
 
 async def pre_step_cleanup(agent):
@@ -737,10 +739,19 @@ async def pre_step_cleanup(agent):
     Uses data-browser-use-exclude attribute so excluded elements are
     invisible to the serializer.
     """
+    global _last_page_url, _same_url_count
     t0 = time.time()
     step_n = agent.state.n_steps
     try:
         page = await agent.browser_session.get_current_page()
+
+        # Stuck detection: track how many steps on the same URL
+        current_url = page.url
+        if current_url == _last_page_url:
+            _same_url_count += 1
+        else:
+            _same_url_count = 0
+            _last_page_url = current_url
 
         # Phase 1: Dismiss popups, clean DOM, run pre_solve (first pass)
         first_result = await page.evaluate("""() => {
@@ -773,6 +784,21 @@ async def pre_step_cleanup(agent):
             }
             var now = new Date();
             tsEl.textContent = 'Agent time: ' + now.toISOString() + ' (epoch: ' + Date.now() + ')';
+
+            // Stuck detection warning
+            var stuckCount = """ + str(_same_url_count) + """;
+            var stuckEl = document.getElementById('__stuck-warning');
+            if (stuckCount >= 5) {
+                if (!stuckEl) {
+                    stuckEl = document.createElement('div');
+                    stuckEl.id = '__stuck-warning';
+                    stuckEl.style.cssText = 'font-size:14px;color:red;font-weight:bold;padding:8px;border:2px solid red;margin:8px 0;background:#fff0f0;';
+                    if (document.body.firstChild) document.body.insertBefore(stuckEl, document.body.firstChild);
+                }
+                stuckEl.textContent = 'WARNING: You have been on this same page for ' + stuckCount + ' steps. STOP repeating the same actions. Try: (1) Read the challenge description carefully, (2) Look for the actual code, (3) Type the code and click Submit Code button.';
+            } else if (stuckEl) {
+                stuckEl.remove();
+            }
 
             if (window.__skills && window.__skills.observe_changes) {
                 var result = window.__skills.observe_changes();
