@@ -33,30 +33,30 @@ function(options) {
   }
 
   // Pattern 2: Click repeatedly-actionable buttons near progress indicators (N/M pattern)
+  // Only for simple single-action counting (e.g. "Capture 0/10"), NOT multi-action sequences.
   if (opts.clickProgressButtons) {
-    var progressPattern = /(\d+)\s*[\/of]\s*(\d+)/;
-    var allText = document.body ? document.body.innerText : '';
-    var progressMatch = allText.match(progressPattern);
-
-    if (progressMatch) {
-      var current = parseInt(progressMatch[1]);
-      var total = parseInt(progressMatch[2]);
-      if (current < total && total <= 20) {
-        // Find clickable elements near the progress text
-        document.querySelectorAll('button, [role="button"]').forEach(function(btn) {
-          var text = btn.textContent.trim().toLowerCase();
-          // Look for buttons that seem to advance progress (capture, collect, click, tap, etc.)
-          if (/^(capture|collect|click|tap|press|grab|get|pick|catch|gather|count|increment|add)/i.test(btn.textContent.trim())) {
-            // Click multiple times to reach the target
-            var remaining = total - current;
-            for (var i = 0; i < Math.min(remaining, 15); i++) {
-              btn.click();
+    document.querySelectorAll('button, [role="button"]').forEach(function(btn) {
+      var text = btn.textContent.trim();
+      var m = text.match(/\((\d+)\s*\/\s*(\d+)\)/);
+      if (m) {
+        var current = parseInt(m[1]);
+        var total = parseInt(m[2]);
+        // Skip multi-action sequences (sequence challenge has hover/type/scroll actions)
+        var hasMultiActions = document.querySelector('[class*="hover"], [class*="scroll"]');
+        if (current < total && total <= 20 && !hasMultiActions) {
+          document.querySelectorAll('button, [role="button"]').forEach(function(target) {
+            var ttext = target.textContent.trim();
+            if (/^(capture|collect|tap|press|grab|get|pick|catch|gather|count|increment|add)/i.test(ttext) && !target.disabled) {
+              var remaining = total - current;
+              for (var i = 0; i < Math.min(remaining, 15); i++) {
+                target.click();
+              }
+              actions.push('Clicked progress button "' + ttext.substring(0, 30) + '" x' + Math.min(remaining, 15) + ' (' + current + '/' + total + ')');
             }
-            actions.push('Clicked progress button "' + btn.textContent.trim().substring(0, 30) + '" x' + Math.min(remaining, 15) + ' (' + current + '/' + total + ')');
-          }
-        });
+          });
+        }
       }
-    }
+    });
   }
 
   // Pattern 3: Click sequential navigation elements (tabs, numbered buttons)
@@ -152,23 +152,110 @@ function(options) {
     }
   })();
 
-  // Pattern 7: Find codes and optionally auto-submit
+  // Pattern 7: Auto-solve hidden_dom — code in data attributes, aria-labels, meta tags
+  (function() {
+    var el = document.querySelector('[data-code]');
+    if (el && el.dataset.code) {
+      actions.push('Found hidden_dom code in data-code: ' + el.dataset.code);
+      return;  // code finding will pick it up if visible, otherwise inject it
+    }
+    // Check aria-label for code pattern
+    var ariaEls = document.querySelectorAll('[aria-label]');
+    ariaEls.forEach(function(a) {
+      var match = a.getAttribute('aria-label').match(/[A-HJ-NP-Z2-9]{6}/);
+      if (match) actions.push('Found hidden_dom code in aria-label: ' + match[0]);
+    });
+    // Check meta tags
+    var metas = document.querySelectorAll('meta[name*="code"], meta[name*="challenge"]');
+    metas.forEach(function(m) {
+      var match = m.content.match(/[A-HJ-NP-Z2-9]{6}/);
+      if (match) actions.push('Found hidden_dom code in meta: ' + match[0]);
+    });
+  })();
+
+  // Pattern 8: Auto-solve split_parts — click all parts, they reveal code fragments
+  (function() {
+    var parts = document.querySelectorAll('[class*="absolute"][class*="bg-yellow"], .absolute.bg-yellow-400');
+    if (parts.length >= 2) {
+      parts.forEach(function(p) { p.click(); });
+      actions.push('Clicked ' + parts.length + ' split parts');
+    }
+  })();
+
+  // Pattern 9: (removed — sequence challenges need multiple action types, better handled by LLM)
+
+  // Pattern 10: Auto-solve service_worker — click Register then Retrieve buttons
+  // First pass clicks Register, second pass (after 3.5s delay) clicks Retrieve
+  (function() {
+    var registerBtn = null;
+    var retrieveBtn = null;
+    document.querySelectorAll('button').forEach(function(btn) {
+      var text = btn.textContent.trim().toLowerCase();
+      if (text.includes('register') && text.includes('service worker')) registerBtn = btn;
+      if (text.includes('retrieve') && text.includes('cache')) retrieveBtn = btn;
+    });
+    if (registerBtn && !registerBtn.disabled) {
+      registerBtn.click();
+      actions.push('Clicked service_worker Register button');
+    }
+    if (retrieveBtn && !retrieveBtn.disabled) {
+      retrieveBtn.click();
+      actions.push('Clicked service_worker Retrieve button');
+    }
+  })();
+
+  // Pattern 11: Auto-solve websocket — click Connect button
+  (function() {
+    document.querySelectorAll('button').forEach(function(btn) {
+      var text = btn.textContent.trim();
+      if (/^connect$/i.test(text) && !btn.disabled) {
+        btn.click();
+        actions.push('Auto-solved websocket: clicked Connect');
+      }
+    });
+  })();
+
+  // Pattern 12: Find codes and optionally auto-submit
   // Challenge charset: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I, O, 0, 1)
   var codePattern = /\b[A-HJ-NP-Z2-9]{6}\b/;
   var foundCodes = [];
 
   if (opts.reportResults || opts.autoSubmit) {
-    // Look for visible codes in code-styled elements
+    // Source 1: data-code attributes
+    document.querySelectorAll('[data-code]').forEach(function(el) {
+      var code = el.dataset.code;
+      if (codePattern.test(code) && foundCodes.indexOf(code) === -1) {
+        foundCodes.push(code);
+      }
+    });
+
+    // Source 2: meta tags
+    document.querySelectorAll('meta[name]').forEach(function(m) {
+      var match = m.content.match(codePattern);
+      if (match && foundCodes.indexOf(match[0]) === -1) {
+        foundCodes.push(match[0]);
+      }
+    });
+
+    // Source 3: aria-label attributes
+    document.querySelectorAll('[aria-label]').forEach(function(el) {
+      var match = el.getAttribute('aria-label').match(codePattern);
+      if (match && foundCodes.indexOf(match[0]) === -1) {
+        foundCodes.push(match[0]);
+      }
+    });
+
+    // Source 4: Visible codes in code-styled elements
     var codeElements = document.querySelectorAll('.font-mono, [class*="code"], code, pre');
     codeElements.forEach(function(el) {
       var text = el.textContent.trim();
       var codeMatch = text.match(codePattern);
-      if (codeMatch && el.offsetWidth > 0) {
+      if (codeMatch && el.offsetWidth > 0 && foundCodes.indexOf(codeMatch[0]) === -1) {
         foundCodes.push(codeMatch[0]);
       }
     });
 
-    // Also search in bold/highlighted text
+    // Source 5: Bold/highlighted text
     document.querySelectorAll('.font-bold, strong, b, [class*="highlight"]').forEach(function(el) {
       var text = el.textContent.trim();
       var codeMatch = text.match(codePattern);
