@@ -93,7 +93,9 @@ function(options) {
 
   // Pattern 5: Auto-solve drag_drop challenges
   // The challenge requires dropping ANY 6 pieces into 6 slots — no validation.
-  // We programmatically fire dragover+drop events on each empty slot.
+  // We fire synthetic drop events with a mock dataTransfer on each empty slot.
+  // Note: new DataTransfer().getData() returns '' in Chromium for synthetic events,
+  // so we use a plain Event with a mock dataTransfer object instead.
   (function() {
     var slots = document.querySelectorAll('[data-slot]');
     var pieces = document.querySelectorAll('[data-piece]');
@@ -106,17 +108,24 @@ function(options) {
         var piece = pieceArr[usedIdx++];
         var pieceId = piece.getAttribute('data-piece');
         // Simulate dragover to allow drop
-        var dragOverEvt = new DragEvent('dragover', { bubbles: true, cancelable: true });
+        var dragOverEvt = new Event('dragover', { bubbles: true, cancelable: true });
+        dragOverEvt.preventDefault = function() {};
         slot.dispatchEvent(dragOverEvt);
-        // Simulate drop with piece data
-        var dt = new DataTransfer();
-        dt.setData('text/plain', pieceId);
-        var dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
+        // Simulate drop with mock dataTransfer (Chromium blocks getData on synthetic DragEvents)
+        var dropEvt = new Event('drop', { bubbles: true, cancelable: true });
+        dropEvt.dataTransfer = {
+          getData: function() { return pieceId; },
+          setData: function() {},
+          dropEffect: 'move',
+          effectAllowed: 'all'
+        };
         slot.dispatchEvent(dropEvt);
       });
       var filledCount = document.querySelectorAll('[data-slot][data-filled]').length;
       if (filledCount > 0) {
         actions.push('Auto-solved drag_drop: filled ' + filledCount + '/' + slots.length + ' slots');
+      } else {
+        actions.push('drag_drop: fired events on ' + slots.length + ' slots but none filled (DOM check)');
       }
     }
   })();
