@@ -14,8 +14,16 @@ function(options) {
   var oldResults = document.getElementById('__pre_solve_results');
   if (oldResults) oldResults.remove();
 
-  // Track last submitted code to prevent re-submitting stale codes from previous steps
-  var lastSubmittedCode = window.__preSolveLastSubmitted || null;
+  // Track all previously submitted codes to prevent re-submitting stale codes from previous steps
+  // This array persists across pre_solve invocations via window global
+  var allSubmittedCodes = window.__preSolveSubmittedCodes || [];
+  // Also detect codes visible as "accepted" on the page (catches manual submissions by LLM)
+  var acceptedMatch = document.body && document.body.innerText &&
+    document.body.innerText.match(/(?:AUTO-SUBMITTED|submitted|accepted)[^A-Z]*([A-HJ-NP-Z2-9]{6})/i);
+  if (acceptedMatch && allSubmittedCodes.indexOf(acceptedMatch[1]) === -1) {
+    allSubmittedCodes.push(acceptedMatch[1]);
+    window.__preSolveSubmittedCodes = allSubmittedCodes;
+  }
 
   // Pattern 1: Click action buttons with general action verbs
   if (opts.clickActionButtons) {
@@ -384,10 +392,11 @@ function(options) {
         }
         fiber = fiber.return;
       }
-      // Add all found React codes (insert at front for priority)
-      for (var ri = reactCodes.length - 1; ri >= 0; ri--) {
+      // Add React codes at END — DOM-visible codes from Sources 1-9 should take priority
+      // For challenges like memory, the DOM-visible code is correct while React state may be stale
+      for (var ri = 0; ri < reactCodes.length; ri++) {
         if (foundCodes.indexOf(reactCodes[ri]) === -1) {
-          foundCodes.unshift(reactCodes[ri]);
+          foundCodes.push(reactCodes[ri]);
           actions.push('React state code: ' + reactCodes[ri]);
         }
       }
@@ -399,9 +408,9 @@ function(options) {
   }
 
   // Auto-submit: if we found a code, type it and click Submit Code
-  // Filter out the last submitted code to prevent re-submitting stale codes from previous steps
-  if (lastSubmittedCode) {
-    foundCodes = foundCodes.filter(function(c) { return c !== lastSubmittedCode; });
+  // Filter out ALL previously submitted codes to prevent re-submitting stale codes
+  if (allSubmittedCodes.length > 0) {
+    foundCodes = foundCodes.filter(function(c) { return allSubmittedCodes.indexOf(c) === -1; });
   }
   // Skip if "Code accepted" is still visible (previous step's success message)
   var alreadyAccepted = document.body && document.body.innerText &&
@@ -442,7 +451,8 @@ function(options) {
         }
         if (!submitBtn.disabled) {
           submitBtn.click();
-          window.__preSolveLastSubmitted = bestCode;
+          if (!window.__preSolveSubmittedCodes) window.__preSolveSubmittedCodes = [];
+          window.__preSolveSubmittedCodes.push(bestCode);
           actions.push('AUTO-SUBMITTED code: ' + bestCode);
         } else {
           actions.push('CODE READY but submit button still disabled: ' + bestCode);
