@@ -16,3 +16,13 @@ venv/
 
 # OS
 .DS_Store
+
+# Test results (transient)
+challenge/challenge-arena/results/
+
+# Claude Code proxy runtime artifacts
+claude-code-api/.venv/
+claude-code-api/claude_projects/
+claude-code-api/claude_sessions/
+claude-code-api/dist/
+claude-code-api/*.db
