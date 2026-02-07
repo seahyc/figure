@@ -14,6 +14,9 @@ function(options) {
   var oldResults = document.getElementById('__pre_solve_results');
   if (oldResults) oldResults.remove();
 
+  // Track last submitted code to prevent re-submitting stale codes from previous steps
+  var lastSubmittedCode = window.__preSolveLastSubmitted || null;
+
   // Pattern 1: Click action buttons with general action verbs
   if (opts.clickActionButtons) {
     var actionVerbs = /^(reveal|play|connect|register|extract|start|show|open|unlock|enable|activate|load|fetch|begin|launch|display|uncover|expose|decode|decrypt|generate|capture)\b/i;
@@ -91,44 +94,7 @@ function(options) {
     }
   }
 
-  // Pattern 5: Auto-solve drag_drop challenges
-  // The challenge requires dropping ANY 6 pieces into 6 slots — no validation.
-  // We fire synthetic drop events with a mock dataTransfer on each empty slot.
-  // Note: new DataTransfer().getData() returns '' in Chromium for synthetic events,
-  // so we use a plain Event with a mock dataTransfer object instead.
-  (function() {
-    var slots = document.querySelectorAll('[data-slot]');
-    var pieces = document.querySelectorAll('[data-piece]');
-    if (slots.length > 0 && pieces.length > 0) {
-      var pieceArr = Array.from(pieces);
-      var usedIdx = 0;
-      slots.forEach(function(slot) {
-        if (slot.dataset.filled) return;
-        if (usedIdx >= pieceArr.length) return;
-        var piece = pieceArr[usedIdx++];
-        var pieceId = piece.getAttribute('data-piece');
-        // Simulate dragover to allow drop
-        var dragOverEvt = new Event('dragover', { bubbles: true, cancelable: true });
-        dragOverEvt.preventDefault = function() {};
-        slot.dispatchEvent(dragOverEvt);
-        // Simulate drop with mock dataTransfer (Chromium blocks getData on synthetic DragEvents)
-        var dropEvt = new Event('drop', { bubbles: true, cancelable: true });
-        dropEvt.dataTransfer = {
-          getData: function() { return pieceId; },
-          setData: function() {},
-          dropEffect: 'move',
-          effectAllowed: 'all'
-        };
-        slot.dispatchEvent(dropEvt);
-      });
-      var filledCount = document.querySelectorAll('[data-slot][data-filled]').length;
-      if (filledCount > 0) {
-        actions.push('Auto-solved drag_drop: filled ' + filledCount + '/' + slots.length + ' slots');
-      } else {
-        actions.push('drag_drop: fired events on ' + slots.length + ' slots but none filled (DOM check)');
-      }
-    }
-  })();
+  // Pattern 5: (removed — drag_drop is now handled by React state extraction in Source 10)
 
   // Pattern 6: Auto-solve gesture challenges
   // The challenge requires one mouse stroke on the canvas, then clicking "Complete".
@@ -366,13 +332,82 @@ function(options) {
       });
     });
 
+    // Source 10: React fiber state extraction (universal — works for all challenge types)
+    // The live site is a React app — challenge codes are stored in component state.
+    // Walk up the React fiber tree from a challenge-specific element to find 6-char codes.
+    // This works for ALL challenge types including drag_drop, gesture, memory, etc.
+    (function() {
+      // Find a starting element INSIDE the current challenge box
+      // The challenge box is a colored container with border inside .max-w-6xl
+      var challengeArea = document.querySelector('.max-w-6xl') || document.querySelector('main');
+      var startEl = null;
+      if (challengeArea) {
+        // Try specific challenge elements first, then generic containers
+        startEl = challengeArea.querySelector('[class*="bg-indigo"]') ||
+                  challengeArea.querySelector('[class*="bg-green"]') ||
+                  challengeArea.querySelector('[class*="bg-blue"]') ||
+                  challengeArea.querySelector('[class*="bg-yellow"]') ||
+                  challengeArea.querySelector('[class*="bg-purple"]') ||
+                  challengeArea.querySelector('[class*="bg-red"]') ||
+                  challengeArea.querySelector('[class*="bg-orange"]') ||
+                  challengeArea.querySelector('[class*="bg-pink"]') ||
+                  challengeArea.querySelector('canvas') ||
+                  challengeArea.querySelector('[class*="border-dashed"]') ||
+                  challengeArea.querySelector('[draggable="true"]') ||
+                  challengeArea.querySelector('[class*="border-2"]') ||
+                  challengeArea.querySelector('strong');
+      }
+      if (!startEl) return;
+      var fiberKey = Object.keys(startEl).find(function(k) { return k.indexOf('__reactFiber') === 0; });
+      if (!fiberKey) return;
+      var fiber = startEl[fiberKey];
+      var reactCodes = [];
+      for (var i = 0; i < 30 && fiber; i++) {
+        if (fiber.memoizedState) {
+          var state = fiber.memoizedState;
+          var depth = 0;
+          while (state && depth < 10) {
+            if (typeof state.memoizedState === 'string' && codePattern.test(state.memoizedState)) {
+              if (reactCodes.indexOf(state.memoizedState) === -1) {
+                reactCodes.push(state.memoizedState);
+              }
+            }
+            if (state.queue && typeof state.queue.lastRenderedState === 'string' &&
+                codePattern.test(state.queue.lastRenderedState)) {
+              if (reactCodes.indexOf(state.queue.lastRenderedState) === -1) {
+                reactCodes.push(state.queue.lastRenderedState);
+              }
+            }
+            state = state.next;
+            depth++;
+          }
+        }
+        fiber = fiber.return;
+      }
+      // Add all found React codes (insert at front for priority)
+      for (var ri = reactCodes.length - 1; ri >= 0; ri--) {
+        if (foundCodes.indexOf(reactCodes[ri]) === -1) {
+          foundCodes.unshift(reactCodes[ri]);
+          actions.push('React state code: ' + reactCodes[ri]);
+        }
+      }
+    })();
+
     if (foundCodes.length > 0) {
       actions.push('Found potential codes: ' + foundCodes.join(', '));
     }
   }
 
-  // Auto-submit: if we found exactly one code, type it and click Submit Code
-  if (opts.autoSubmit && foundCodes.length >= 1) {
+  // Auto-submit: if we found a code, type it and click Submit Code
+  // Filter out the last submitted code to prevent re-submitting stale codes from previous steps
+  if (lastSubmittedCode) {
+    foundCodes = foundCodes.filter(function(c) { return c !== lastSubmittedCode; });
+  }
+  // Skip if "Code accepted" is still visible (previous step's success message)
+  var alreadyAccepted = document.body && document.body.innerText &&
+    (document.body.innerText.indexOf('Code accepted') !== -1 ||
+     document.body.innerText.indexOf('Proceeding to step') !== -1);
+  if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted) {
     // Strategy 1: ID-based selectors (local challenge server)
     var codeInput = document.getElementById('code-input');
     var submitBtn = document.getElementById('submit-code');
@@ -407,6 +442,7 @@ function(options) {
         }
         if (!submitBtn.disabled) {
           submitBtn.click();
+          window.__preSolveLastSubmitted = bestCode;
           actions.push('AUTO-SUBMITTED code: ' + bestCode);
         } else {
           actions.push('CODE READY but submit button still disabled: ' + bestCode);

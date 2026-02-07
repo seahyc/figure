@@ -761,8 +761,7 @@ async def pre_step_cleanup(agent):
             if (window.__skills.pre_solve) return window.__skills.pre_solve();
             return 'no_pre_solve';
         }""")
-        if step_n <= 5 or step_n % 10 == 0:
-            print(f"[pre_step_cleanup] Phase 1 result: {str(first_result)[:100]}")
+        print(f"[pre_step_cleanup] Phase 1 result: {str(first_result)[:120]}")
 
         # Phase 2: If first pass didn't auto-submit, wait for delayed content and retry.
         # This catches delayed_reveal (3s timer) and timed challenges without slowing
