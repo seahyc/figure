@@ -746,7 +746,7 @@ async def pre_step_cleanup(agent):
         page = await agent.browser_session.get_current_page()
 
         # Stuck detection: track how many steps on the same URL
-        current_url = page.url
+        current_url = await page.evaluate("() => window.location.href")
         if current_url == _last_page_url:
             _same_url_count += 1
         else:
@@ -761,6 +761,8 @@ async def pre_step_cleanup(agent):
             if (window.__skills.pre_solve) return window.__skills.pre_solve();
             return 'no_pre_solve';
         }""")
+        if step_n <= 5 or step_n % 10 == 0:
+            print(f"[pre_step_cleanup] Phase 1 result: {str(first_result)[:100]}")
 
         # Phase 2: If first pass didn't auto-submit, wait for delayed content and retry.
         # This catches delayed_reveal (3s timer) and timed challenges without slowing
@@ -816,8 +818,8 @@ async def pre_step_cleanup(agent):
                 if (window.__domChangeLog) window.__domChangeLog = [];
             }
         }""")
-    except Exception:
-        pass  # Don't crash the step if cleanup fails
+    except Exception as e:
+        print(f"[pre_step_cleanup] ERROR: {e}")
     cleanup_ms = (time.time() - t0) * 1000
     _step_timings.append((step_n, 'cleanup', cleanup_ms))
     ts = time.strftime('%H:%M:%S')
