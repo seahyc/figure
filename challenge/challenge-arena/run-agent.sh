@@ -19,7 +19,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENT_DIR="$(cd "$SCRIPT_DIR/../../figure-agent-v2" && pwd)"
+AGENT_DIR="$(cd "$SCRIPT_DIR/../../agents/browser-use" && pwd)"
 SERVER_PORT=8765
 BASE_URL="http://127.0.0.1:${SERVER_PORT}"
 

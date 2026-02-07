@@ -39,7 +39,7 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError
 
 SCRIPT_DIR = Path(__file__).parent
-AGENT_DIR = SCRIPT_DIR.parent.parent / "figure-agent-v2"
+AGENT_DIR = SCRIPT_DIR.parent.parent / "agents" / "browser-use"
 RESULTS_DIR = SCRIPT_DIR / "results"
 SERVER_PORT = 8765
 BASE_URL = f"http://127.0.0.1:{SERVER_PORT}"
@@ -174,6 +174,7 @@ def run_agent(url: str, model: str, timeout: int = 300) -> dict:
         "--url", url,
         "--goal-file", str(goal_file),
         "--model", model,
+        "--headless",
     ]
 
     t0 = time.time()
