@@ -719,7 +719,8 @@ WHEN PRE-SOLVE DIDN'T HANDLE IT:
 10. Hidden DOM → evaluate("window.__skills.search_dom({text:'[A-Z0-9]{6}'})")
 
 NEVER click: "Next", "Continue", "Proceed", "Go Forward", "Click Me", floating elements.
-ONLY "Submit Code" (id=submit-code) advances to the next step.
+ONLY "Submit Code" button advances to the next step. Find it by its text content.
+Input field: look for placeholder "Enter 6-character code" if #code-input doesn't exist.
 """
 
 

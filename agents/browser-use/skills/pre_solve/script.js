@@ -10,6 +10,10 @@ function(options) {
 
   var actions = [];
 
+  // Clear old results div to prevent false positives from previous steps
+  var oldResults = document.getElementById('__pre_solve_results');
+  if (oldResults) oldResults.remove();
+
   // Pattern 1: Click action buttons with general action verbs
   if (opts.clickActionButtons) {
     var actionVerbs = /^(reveal|play|connect|register|extract|start|show|open|unlock|enable|activate|load|fetch|begin|launch|display|uncover|expose|decode|decrypt|generate|capture)\b/i;
