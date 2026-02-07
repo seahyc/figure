@@ -1,0 +1,20 @@
+[project]
+name = "pattern-agent"
+version = "0.1.0"
+description = "Fast, DOM-first browser agent with online pattern learning"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "playwright>=1.50.0",
+  "python-dotenv>=1.0.1",
+]
+
+[project.scripts]
+pattern-agent = "pattern_agent.cli:main"
+
+[build-system]
+requires = ["setuptools>=69.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
