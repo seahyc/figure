@@ -695,33 +695,31 @@ def build_tools() -> Tools:
 
 SYSTEM_PROMPT = """You are an efficient web automation agent. Follow the task instructions carefully.
 
+CRITICAL — PRE-SOLVE AUTO-SUBMITS:
+pre_solve runs AUTOMATICALLY before you see the page. It clicks action buttons, solves
+drag_drop/gesture, finds codes, and AUTO-SUBMITS them. Check #__pre_solve_results first.
+If it says "AUTO-SUBMITTED", the step is ALREADY DONE — just wait for the next page.
+
 EFFICIENCY RULES:
-- Think concisely (1-2 sentences max). Act decisively.
-- Combine related actions when possible (e.g., input + click)
-- If stuck after 2 attempts, try a completely different approach
+- Think in 1-2 sentences max. Act immediately.
+- If pre_solve already submitted, do NOTHING — page will advance.
+- Combine actions: input + click in one step.
+- If stuck after 2 attempts, use search_dom or try a completely different approach.
 
-EFFICIENT CHALLENGE SOLVING:
-1. PRE-SOLVE runs automatically — check #__pre_solve_results div for what it found
-2. Look for revealed codes (class "font-mono font-bold" or similar) before doing anything
-3. If code is already visible, go straight to input + submit
-4. For math/string puzzles: use evaluate("window.__skills.compute({math: 'EXPRESSION'})") — don't do mental math
-5. For shadow DOM (text "Shadow"): use evaluate("window.__skills.shadow_dom()")
-6. For canvas/drawing: use draw(index=N, strokes=3)
-7. For hover challenges: use hover(index=N), then re-read page
-8. NEVER click: "Next", "Continue", "Proceed", "Go Forward", "Click Me", floating elements
-9. ONLY "Submit Code" advances to the next step
+WHEN PRE-SOLVE DIDN'T HANDLE IT:
+1. Check if code is visible (font-mono, font-bold, highlighted text) → input + submit
+2. Scroll challenge → evaluate("window.__skills.scroll_to({position:'bottom'})")
+3. Hover challenge → hover(index=N), then check for revealed code
+4. Shadow DOM → evaluate("window.__skills.shadow_dom()")
+5. Canvas/drawing → draw(index=N, strokes=3)
+6. Keyboard sequence → send_keys("ArrowUp ArrowDown ArrowLeft ArrowRight")
+7. Math/calculation → evaluate("window.__skills.compute({math: 'EXPRESSION'})")
+8. Base64/encoded → evaluate("window.__skills.compute({decode: 'BASE64_STRING'})")
+9. Reversed string → evaluate("window.__skills.compute({reverse: 'STRING'})")
+10. Hidden DOM → evaluate("window.__skills.search_dom({text:'[A-Z0-9]{6}'})")
 
-AVAILABLE SKILLS (via evaluate):
-- window.__skills.scroll_to({y:N}) or ({selector:'#id'}) or ({position:'bottom'})
-- window.__skills.search_dom({text:'pattern'}) - find elements by text
-- window.__skills.shadow_dom() - traverse shadow DOM
-- window.__skills.compute({math:'expr', reverse:'str', decode:'base64'}) - math & string ops
-- window.__skills.pre_solve() - auto-click action buttons, find codes (runs automatically)
-
-COMMON ACTIONS:
-- click(index=N), input(index=N, text="X"), hover(index=N)
-- send_keys("ArrowUp ArrowDown Enter"), drag(source=N, target=M)
-- draw(index=N, strokes=3) for canvas challenges
+NEVER click: "Next", "Continue", "Proceed", "Go Forward", "Click Me", floating elements.
+ONLY "Submit Code" (id=submit-code) advances to the next step.
 """
 
 
@@ -742,22 +740,29 @@ async def pre_step_cleanup(agent):
     step_n = agent.state.n_steps
     try:
         page = await agent.browser_session.get_current_page()
-        await page.evaluate("""() => {
-            if (!window.__skills) return;
 
-            // Phase 1: Dismiss popups and blocking modals
+        # Phase 1: Dismiss popups, clean DOM, run pre_solve (first pass)
+        first_result = await page.evaluate("""() => {
+            if (!window.__skills) return 'no_skills';
             if (window.__skills.dismiss_popups) window.__skills.dismiss_popups();
-
-            // Phase 2: Clean DOM
             if (window.__skills.clean_dom) window.__skills.clean_dom();
+            if (window.__skills.pre_solve) return window.__skills.pre_solve();
+            return 'no_pre_solve';
+        }""")
 
-            // Phase 3: Run pre_solve to auto-handle patterns
-            if (window.__skills.pre_solve) window.__skills.pre_solve();
+        # Phase 2: If first pass didn't auto-submit, wait for delayed content and retry.
+        # This catches delayed_reveal (3s timer) and timed challenges without slowing
+        # down steps that pre_solve already handled.
+        if first_result and "AUTO-SUBMITTED" not in str(first_result):
+            await asyncio.sleep(3.5)
+            await page.evaluate("""() => {
+                if (window.__skills && window.__skills.pre_solve) window.__skills.pre_solve();
+            }""")
 
-            // Phase 4: Scroll to top so LLM sees challenge area first
+        # Phase 3: DOM cleanup and metadata injection
+        await page.evaluate("""() => {
             window.scrollTo(0, 0);
 
-            // Inject current timestamp so the LLM knows what time it is
             var tsEl = document.getElementById('__agent-timestamp');
             if (!tsEl) {
                 tsEl = document.createElement('div');
@@ -768,8 +773,7 @@ async def pre_step_cleanup(agent):
             var now = new Date();
             tsEl.textContent = 'Agent time: ' + now.toISOString() + ' (epoch: ' + Date.now() + ')';
 
-            // Start DOM change observer (idempotent) and inject summary
-            if (window.__skills.observe_changes) {
+            if (window.__skills && window.__skills.observe_changes) {
                 var result = window.__skills.observe_changes();
                 var existing = document.getElementById('__dom-changes-summary');
                 if (existing) existing.remove();

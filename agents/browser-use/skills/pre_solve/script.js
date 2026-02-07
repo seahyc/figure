@@ -4,7 +4,8 @@ function(options) {
     clickProgressButtons: true,
     clickSequentialNav: true,
     waitForCountdowns: true,
-    reportResults: true
+    reportResults: true,
+    autoSubmit: true
   }, options || {});
 
   var actions = [];
@@ -151,24 +152,26 @@ function(options) {
     }
   })();
 
-  // Pattern 7: Report findings by injecting a results div
-  if (opts.reportResults) {
-    // Look for visible codes on the page (common code format)
+  // Pattern 7: Find codes and optionally auto-submit
+  // Challenge charset: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I, O, 0, 1)
+  var codePattern = /\b[A-HJ-NP-Z2-9]{6}\b/;
+  var foundCodes = [];
+
+  if (opts.reportResults || opts.autoSubmit) {
+    // Look for visible codes in code-styled elements
     var codeElements = document.querySelectorAll('.font-mono, [class*="code"], code, pre');
-    var foundCodes = [];
     codeElements.forEach(function(el) {
       var text = el.textContent.trim();
-      // Match 6-char alphanumeric codes
-      var codeMatch = text.match(/\b[A-Za-z0-9]{6}\b/);
+      var codeMatch = text.match(codePattern);
       if (codeMatch && el.offsetWidth > 0) {
         foundCodes.push(codeMatch[0]);
       }
     });
 
-    // Also search for codes in bold/highlighted text
+    // Also search in bold/highlighted text
     document.querySelectorAll('.font-bold, strong, b, [class*="highlight"]').forEach(function(el) {
       var text = el.textContent.trim();
-      var codeMatch = text.match(/\b[A-Za-z0-9]{6}\b/);
+      var codeMatch = text.match(codePattern);
       if (codeMatch && el.offsetWidth > 0 && foundCodes.indexOf(codeMatch[0]) === -1) {
         foundCodes.push(codeMatch[0]);
       }
@@ -177,8 +180,29 @@ function(options) {
     if (foundCodes.length > 0) {
       actions.push('Found potential codes: ' + foundCodes.join(', '));
     }
+  }
 
-    // Inject results into DOM for LLM visibility
+  // Auto-submit: if we found exactly one code, type it and click Submit Code
+  if (opts.autoSubmit && foundCodes.length >= 1) {
+    var codeInput = document.getElementById('code-input');
+    var submitBtn = document.getElementById('submit-code');
+    if (codeInput && submitBtn && !submitBtn.disabled) {
+      var bestCode = foundCodes[0];
+      // Only submit if input is empty or has the same code (avoid double-submit)
+      if (!codeInput.value || codeInput.value === bestCode) {
+        // Set value using native setter to trigger React/framework change handlers
+        var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        nativeInputValueSetter.call(codeInput, bestCode);
+        codeInput.dispatchEvent(new Event('input', { bubbles: true }));
+        codeInput.dispatchEvent(new Event('change', { bubbles: true }));
+        submitBtn.click();
+        actions.push('AUTO-SUBMITTED code: ' + bestCode);
+      }
+    }
+  }
+
+  // Inject results into DOM for LLM visibility
+  if (opts.reportResults) {
     var resultsDiv = document.getElementById('__pre_solve_results');
     if (!resultsDiv) {
       resultsDiv = document.createElement('div');
