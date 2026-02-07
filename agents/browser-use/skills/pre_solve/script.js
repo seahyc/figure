@@ -86,7 +86,72 @@ function(options) {
     }
   }
 
-  // Pattern 5: Report findings by injecting a results div
+  // Pattern 5: Auto-solve drag_drop challenges
+  // The challenge requires dropping ANY 6 pieces into 6 slots — no validation.
+  // We programmatically fire dragover+drop events on each empty slot.
+  (function() {
+    var slots = document.querySelectorAll('[data-slot]');
+    var pieces = document.querySelectorAll('[data-piece]');
+    if (slots.length > 0 && pieces.length > 0) {
+      var pieceArr = Array.from(pieces);
+      var usedIdx = 0;
+      slots.forEach(function(slot) {
+        if (slot.dataset.filled) return;
+        if (usedIdx >= pieceArr.length) return;
+        var piece = pieceArr[usedIdx++];
+        var pieceId = piece.getAttribute('data-piece');
+        // Simulate dragover to allow drop
+        var dragOverEvt = new DragEvent('dragover', { bubbles: true, cancelable: true });
+        slot.dispatchEvent(dragOverEvt);
+        // Simulate drop with piece data
+        var dt = new DataTransfer();
+        dt.setData('text/plain', pieceId);
+        var dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
+        slot.dispatchEvent(dropEvt);
+      });
+      var filledCount = document.querySelectorAll('[data-slot][data-filled]').length;
+      if (filledCount > 0) {
+        actions.push('Auto-solved drag_drop: filled ' + filledCount + '/' + slots.length + ' slots');
+      }
+    }
+  })();
+
+  // Pattern 6: Auto-solve gesture challenges
+  // The challenge requires one mouse stroke on the canvas, then clicking "Complete".
+  // We simulate mousedown, mousemove, mouseup to draw, then click the button.
+  (function() {
+    var canvas = document.querySelector('canvas.cursor-crosshair, canvas[class*="crosshair"]');
+    if (!canvas) return;
+    var gestureBtn = document.getElementById('gesture-complete');
+    // Only act if the button exists and is disabled (not already solved)
+    if (!gestureBtn || !gestureBtn.disabled) return;
+    var rect = canvas.getBoundingClientRect();
+    var cx = rect.left + rect.width / 2;
+    var cy = rect.top + rect.height / 2;
+    var hw = rect.width * 0.3;
+    var hh = rect.height * 0.3;
+    // Draw a simple square
+    var points = [
+      [cx - hw, cy - hh], [cx + hw, cy - hh],
+      [cx + hw, cy + hh], [cx - hw, cy + hh],
+      [cx - hw, cy - hh]
+    ];
+    canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: points[0][0], clientY: points[0][1] }));
+    for (var i = 1; i < points.length; i++) {
+      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: points[i][0], clientY: points[i][1] }));
+    }
+    canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: points[4][0], clientY: points[4][1] }));
+    // Now click the Complete button (it should be enabled after mouseup)
+    gestureBtn = document.getElementById('gesture-complete');
+    if (gestureBtn && !gestureBtn.disabled) {
+      gestureBtn.click();
+      actions.push('Auto-solved gesture: drew square + clicked Complete');
+    } else {
+      actions.push('Gesture: drew on canvas, button may need another click');
+    }
+  })();
+
+  // Pattern 7: Report findings by injecting a results div
   if (opts.reportResults) {
     // Look for visible codes on the page (common code format)
     var codeElements = document.querySelectorAll('.font-mono, [class*="code"], code, pre');

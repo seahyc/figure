@@ -18,11 +18,13 @@ of LLM round-trips needed per step.
 2. Clicks progress buttons repeatedly when N/M progress indicators are visible
 3. Clicks sequential navigation elements (Tab 1, Tab 2, etc.)
 4. Detects countdowns/timers on the page
-5. Reports any visible 6-character codes found on the page
+5. Auto-solves drag_drop challenges (fires drop events on empty slots)
+6. Auto-solves gesture challenges (draws a stroke on canvas + clicks Complete)
+7. Reports any visible 6-character codes found on the page
 
 ## What It Does NOT Do (left to LLM)
 - No hardcoded CSS selectors
-- Shadow DOM, canvas, drag-drop, keyboard sequences
+- Shadow DOM, canvas (non-gesture), keyboard sequences
 - Code reading or submission
 - Math or string manipulation
 
