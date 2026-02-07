@@ -833,6 +833,8 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
             browser = Browser(
                 headless=headless,
                 viewport={"width": 1280, "height": 800},
+                disable_security=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
 
             agent = Agent(
