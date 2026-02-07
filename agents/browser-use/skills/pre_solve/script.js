@@ -215,6 +215,51 @@ function(options) {
     });
   })();
 
+  // Pattern 13: Auto-solve scroll_reveal — scroll page to trigger scroll-based reveals
+  // Only trigger when the challenge description explicitly mentions scrolling to reveal
+  (function() {
+    // Look for scroll instructions in the challenge area, not entire body
+    var challengeArea = document.querySelector('.max-w-6xl') || document.querySelector('main') || document.body;
+    var headings = challengeArea.querySelectorAll('p, h1, h2, h3, strong, div.text-sm');
+    var hasScrollChallenge = false;
+    headings.forEach(function(el) {
+      var t = el.textContent.trim();
+      if (/scroll.*to\s*reveal|scroll\s*down.*\d+px|scroll.*reveal.*code/i.test(t)) {
+        hasScrollChallenge = true;
+      }
+    });
+    if (hasScrollChallenge) {
+      var maxScroll = Math.max(document.body.scrollHeight, 1500);
+      window.scrollTo(0, maxScroll);
+      actions.push('Auto-scrolled to ' + maxScroll + 'px for scroll_reveal');
+    }
+  })();
+
+  // Pattern 14: Auto-solve hidden_dom click variant — "click here N more times"
+  (function() {
+    var bodyText = document.body ? document.body.innerText : '';
+    var clickMatch = bodyText.match(/click here (\d+) more times?/i);
+    if (clickMatch) {
+      var needed = parseInt(clickMatch[1]);
+      // The "click here" text is inside a cursor-pointer div, click that container
+      var target = document.querySelector('.cursor-pointer');
+      if (!target) {
+        // Fallback: find any element containing the "click here N more" text
+        document.querySelectorAll('p, div, span').forEach(function(el) {
+          if (!target && el.textContent.includes('click here') && el.textContent.includes('more time')) {
+            target = el.closest('[class*="cursor"]') || el;
+          }
+        });
+      }
+      if (target) {
+        for (var c = 0; c < needed + 1; c++) {
+          target.click();
+        }
+        actions.push('Hidden DOM click: clicked ' + (needed + 1) + ' times on cursor-pointer');
+      }
+    }
+  })();
+
   // Pattern 12: Find codes and optionally auto-submit
   // Challenge charset: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I, O, 0, 1)
   var codePattern = /\b[A-HJ-NP-Z2-9]{6}\b/;
@@ -264,6 +309,50 @@ function(options) {
       }
     });
 
+    // Source 6: Hidden elements (display:none, visibility:hidden, opacity:0)
+    document.querySelectorAll('*').forEach(function(el) {
+      if (el.children.length > 0) return; // only leaf nodes
+      var text = el.textContent.trim();
+      if (!text || text.length > 20) return;
+      var match = text.match(codePattern);
+      if (!match || foundCodes.indexOf(match[0]) !== -1) return;
+      var s = getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0' ||
+          el.offsetWidth === 0 || el.offsetHeight === 0) {
+        foundCodes.push(match[0]);
+      }
+    });
+
+    // Source 7: HTML comments
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+    while (walker.nextNode()) {
+      var match = walker.currentNode.textContent.match(codePattern);
+      if (match && foundCodes.indexOf(match[0]) === -1) {
+        foundCodes.push(match[0]);
+      }
+    }
+
+    // Source 8: title attributes
+    document.querySelectorAll('[title]').forEach(function(el) {
+      var match = el.getAttribute('title').match(codePattern);
+      if (match && foundCodes.indexOf(match[0]) === -1) {
+        foundCodes.push(match[0]);
+      }
+    });
+
+    // Source 9: CSS ::before/::after content (via computed style)
+    document.querySelectorAll('*').forEach(function(el) {
+      ['::before', '::after'].forEach(function(pseudo) {
+        var content = getComputedStyle(el, pseudo).content;
+        if (content && content !== 'none' && content !== 'normal') {
+          var match = content.match(codePattern);
+          if (match && foundCodes.indexOf(match[0]) === -1) {
+            foundCodes.push(match[0]);
+          }
+        }
+      });
+    });
+
     if (foundCodes.length > 0) {
       actions.push('Found potential codes: ' + foundCodes.join(', '));
     }
@@ -271,9 +360,19 @@ function(options) {
 
   // Auto-submit: if we found exactly one code, type it and click Submit Code
   if (opts.autoSubmit && foundCodes.length >= 1) {
+    // Strategy 1: ID-based selectors (local challenge server)
     var codeInput = document.getElementById('code-input');
     var submitBtn = document.getElementById('submit-code');
-    if (codeInput && submitBtn && !submitBtn.disabled) {
+    // Strategy 2: Attribute/text-based selectors (live Netlify site)
+    if (!codeInput) {
+      codeInput = document.querySelector('input[placeholder*="code" i], input[placeholder*="character" i]');
+    }
+    if (!submitBtn) {
+      document.querySelectorAll('button').forEach(function(btn) {
+        if (btn.textContent.trim() === 'Submit Code') submitBtn = btn;
+      });
+    }
+    if (codeInput && submitBtn) {
       var bestCode = foundCodes[0];
       // Only submit if input is empty or has the same code (avoid double-submit)
       if (!codeInput.value || codeInput.value === bestCode) {
@@ -282,8 +381,23 @@ function(options) {
         nativeInputValueSetter.call(codeInput, bestCode);
         codeInput.dispatchEvent(new Event('input', { bubbles: true }));
         codeInput.dispatchEvent(new Event('change', { bubbles: true }));
-        submitBtn.click();
-        actions.push('AUTO-SUBMITTED code: ' + bestCode);
+        // Re-query submit button (input event may have enabled it)
+        if (submitBtn.disabled) {
+          // Try re-finding the button after state change
+          var freshBtn = document.getElementById('submit-code');
+          if (!freshBtn) {
+            document.querySelectorAll('button').forEach(function(btn) {
+              if (btn.textContent.trim() === 'Submit Code') freshBtn = btn;
+            });
+          }
+          if (freshBtn && !freshBtn.disabled) submitBtn = freshBtn;
+        }
+        if (!submitBtn.disabled) {
+          submitBtn.click();
+          actions.push('AUTO-SUBMITTED code: ' + bestCode);
+        } else {
+          actions.push('CODE READY but submit button still disabled: ' + bestCode);
+        }
       }
     }
   }
