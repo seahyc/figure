@@ -20,6 +20,7 @@ from browser_use.tools.service import Tools
 from browser_use.tools.views import DoneAction
 from browser_use.llm.openai.chat import ChatOpenAI
 from browser_use.llm.google import ChatGoogle
+from browser_use.llm.anthropic.chat import ChatAnthropic
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -60,13 +61,20 @@ class RunLogger:
     async def save_screenshot(self, page, step_num: int, label: str = ""):
         """Save screenshot after each step."""
         try:
+            import base64
             fname = f"step-{step_num:03d}"
             if label:
                 fname += f"-{label}"
             fname += ".png"
             path = self.run_dir / "screenshots" / fname
-            png = await page.screenshot(type="png")
-            path.write_bytes(png)
+            png = await page.screenshot()
+            if isinstance(png, str):
+                # base64 encoded string
+                path.write_bytes(base64.b64decode(png))
+            elif isinstance(png, bytes):
+                path.write_bytes(png)
+            else:
+                path.write_bytes(bytes(png))
             return path
         except Exception as e:
             print(f"[RunLogger] Screenshot failed: {e}")
@@ -220,6 +228,16 @@ def generate_skills_prompt(skills: list[SkillInfo]) -> str:
 # ---------------------------------------------------------------------------
 # Model registry: family groups auto-determine fallbacks
 MODELS = {
+    "claude": {
+        "name": "Claude Sonnet 4.5 via Max subscription (local proxy)",
+        "vision": True,
+        "family": "anthropic",
+    },
+    "claude-api": {
+        "name": "Claude Sonnet 4.5 (direct API, pay-per-token)",
+        "vision": True,
+        "family": "anthropic-api",
+    },
     "kimi": {
         "name": "Kimi K2.5 (multimodal, 256K context)",
         "vision": True,
@@ -244,21 +262,46 @@ MODELS = {
 
 # Default model per family (used for auto-fallback)
 FAMILY_DEFAULTS = {
+    "anthropic": "claude",
+    "anthropic-api": "claude-api",
     "kimi": "kimi",
     "gemini": "gemini",
 }
 
 
 def get_fallback(model_key: str) -> str:
-    """Get the fallback model from the other family."""
+    """Get the fallback model from another family."""
     my_family = MODELS[model_key]["family"]
-    other_family = "gemini" if my_family == "kimi" else "kimi"
+    # Fallback chain: anthropic → gemini → kimi → gemini
+    fallback_order = {"anthropic": "gemini", "anthropic-api": "gemini", "gemini": "kimi", "kimi": "gemini"}
+    other_family = fallback_order.get(my_family, "gemini")
     return FAMILY_DEFAULTS[other_family]
 
 
 def get_llm(model_key: str):
     """Get LLM instance by model key."""
-    if model_key == "kimi":
+    if model_key == "claude":
+        # Claude via local proxy (Max subscription) — OpenAI-compatible API
+        return ChatOpenAI(
+            model="claude-sonnet-4-5-20250929",
+            api_key="not-needed",
+            base_url="http://127.0.0.1:8000/v1",
+            temperature=0.0,
+        )
+
+    elif model_key == "claude-api":
+        # Claude via direct Anthropic API (pay-per-token)
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable required")
+        return ChatAnthropic(
+            model="claude-sonnet-4-5-20250929",
+            api_key=api_key,
+            temperature=0.0,
+            max_tokens=8192,
+        )
+
+    elif model_key == "kimi":
         api_key = os.getenv("KIMI_API_KEY")
         if not api_key:
             raise ValueError("KIMI_API_KEY environment variable required")
@@ -320,15 +363,29 @@ FRAME_INTERVAL = 3  # seconds
 
 
 async def _screenshot_loop(get_page_fn):
-    """Background task: capture screenshots at regular intervals."""
+    """Background task: capture screenshots at regular intervals and save to disk."""
+    import base64 as b64
+    frame_num = 0
     while True:
         try:
             page = await get_page_fn()
-            png = await page.screenshot(type="png")
+            raw = await page.screenshot()
+            if isinstance(raw, str):
+                png = b64.b64decode(raw)
+            elif isinstance(raw, bytes):
+                png = raw
+            else:
+                png = bytes(raw)
             _frame_buffer.append((time.time(), png))
-            # Trim oldest
+            # Trim oldest from memory buffer
             while len(_frame_buffer) > FRAME_MAX:
                 _frame_buffer.pop(0)
+            # Save every frame to disk for post-run review
+            if _run_logger:
+                frame_num += 1
+                ts = datetime.now().strftime("%H%M%S")
+                path = _run_logger.run_dir / "screenshots" / f"stream-{frame_num:04d}-{ts}.png"
+                path.write_bytes(png)
         except asyncio.CancelledError:
             break
         except Exception:
@@ -638,16 +695,28 @@ def build_tools() -> Tools:
 
 SYSTEM_PROMPT = """You are an efficient web automation agent. Follow the task instructions carefully.
 
-EFFICIENCY TIPS:
-- Think concisely (1-2 sentences max)
-- Act decisively - don't describe what you'll do, just do it
+EFFICIENCY RULES:
+- Think concisely (1-2 sentences max). Act decisively.
 - Combine related actions when possible (e.g., input + click)
 - If stuck after 2 attempts, try a completely different approach
+
+EFFICIENT CHALLENGE SOLVING:
+1. PRE-SOLVE runs automatically — check #__pre_solve_results div for what it found
+2. Look for revealed codes (class "font-mono font-bold" or similar) before doing anything
+3. If code is already visible, go straight to input + submit
+4. For math/string puzzles: use evaluate("window.__skills.compute({math: 'EXPRESSION'})") — don't do mental math
+5. For shadow DOM (text "Shadow"): use evaluate("window.__skills.shadow_dom()")
+6. For canvas/drawing: use draw(index=N, strokes=3)
+7. For hover challenges: use hover(index=N), then re-read page
+8. NEVER click: "Next", "Continue", "Proceed", "Go Forward", "Click Me", floating elements
+9. ONLY "Submit Code" advances to the next step
 
 AVAILABLE SKILLS (via evaluate):
 - window.__skills.scroll_to({y:N}) or ({selector:'#id'}) or ({position:'bottom'})
 - window.__skills.search_dom({text:'pattern'}) - find elements by text
 - window.__skills.shadow_dom() - traverse shadow DOM
+- window.__skills.compute({math:'expr', reverse:'str', decode:'base64'}) - math & string ops
+- window.__skills.pre_solve() - auto-click action buttons, find codes (runs automatically)
 
 COMMON ACTIONS:
 - click(index=N), input(index=N, text="X"), hover(index=N)
@@ -675,8 +744,18 @@ async def pre_step_cleanup(agent):
         page = await agent.browser_session.get_current_page()
         await page.evaluate("""() => {
             if (!window.__skills) return;
+
+            // Phase 1: Dismiss popups and blocking modals
             if (window.__skills.dismiss_popups) window.__skills.dismiss_popups();
+
+            // Phase 2: Clean DOM
             if (window.__skills.clean_dom) window.__skills.clean_dom();
+
+            // Phase 3: Run pre_solve to auto-handle patterns
+            if (window.__skills.pre_solve) window.__skills.pre_solve();
+
+            // Phase 4: Scroll to top so LLM sees challenge area first
+            window.scrollTo(0, 0);
 
             // Inject current timestamp so the LLM knows what time it is
             var tsEl = document.getElementById('__agent-timestamp');
@@ -768,7 +847,7 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                     {"navigate": {"url": url}},  # Then navigate
                 ],
                 # Performance optimizations (documented browser-use options)
-                max_history_items=15,
+                max_history_items=10,
                 use_judge=False,  # Skip extra LLM evaluation call
                 # NOTE: Don't use vision_detail_level="low" or small screenshots
                 # - it causes the model to hallucinate codes instead of reading them
@@ -782,7 +861,6 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                 ts = time.strftime('%H:%M:%S')
                 print(f"[{ts}][Step {step_n}] total: {step_time:.1f}s")
 
-                # Save screenshot after each step
                 if _run_logger:
                     try:
                         page = await agent.browser_session.get_current_page()
@@ -796,6 +874,36 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                             _run_logger.save_dom_event(step_n, dom_events)
                     except Exception as e:
                         print(f"[RunLogger] Post-step capture failed: {e}")
+
+                    # Save LLM conversation state for this step
+                    try:
+                        llm_data = {
+                            "step": step_n,
+                            "timestamp": datetime.now().isoformat(),
+                            "model_output": None,
+                            "result": None,
+                        }
+                        mo = agent.state.last_model_output
+                        if mo:
+                            llm_data["model_output"] = {
+                                "evaluation_previous_goal": mo.current_state.evaluation_previous_goal if mo.current_state else None,
+                                "memory": mo.current_state.memory if mo.current_state else None,
+                                "next_goal": mo.current_state.next_goal if mo.current_state else None,
+                                "actions": [str(a) for a in mo.action] if mo.action else [],
+                            }
+                        last_result = agent.state.last_result
+                        if last_result:
+                            llm_data["result"] = [
+                                {
+                                    "extracted_content": r.extracted_content,
+                                    "error": r.error,
+                                    "is_done": r.is_done,
+                                }
+                                for r in last_result
+                            ]
+                        _run_logger.save_llm_call(step_n, {}, llm_data)
+                    except Exception as e:
+                        print(f"[RunLogger] LLM log failed: {e}")
 
             # Auto-clean conv logs from previous runs
             conv_dir = Path("/tmp/agent-conv")
@@ -920,8 +1028,8 @@ async def main():
     goal_group = parser.add_mutually_exclusive_group(required=True)
     goal_group.add_argument("--goal", help="Goal to accomplish")
     goal_group.add_argument("--goal-file", help="Path to a text file containing the goal/prompt")
-    parser.add_argument("--model", "-m", choices=model_choices, default="kimi",
-                        help="Primary LLM model (default: kimi)")
+    parser.add_argument("--model", "-m", choices=model_choices, default="claude",
+                        help="Primary LLM model (default: claude via Max subscription)")
     parser.add_argument("--fallback", "-f", choices=model_choices, default=None,
                         help="Fallback LLM model (default: auto from other family)")
     parser.add_argument("--headless", action="store_true", help="Run headless")
