@@ -122,6 +122,47 @@ function(options) {
     }
   }
 
+  // Pattern 5a: Auto-solve rotating code challenge — click Capture button 3 times
+  // The challenge shows random 6-char codes that change every 150ms. After 3 Capture clicks, the real code appears.
+  // Pattern 1 only clicks it once; we need all 3 clicks to reveal the code.
+  var __rotatingActive = false;
+  (function() {
+    var captureBtn = document.getElementById('rotating-capture');
+    var countEl = document.getElementById('rotating-count');
+    if (!captureBtn && !countEl) return;
+    // Check if captures are already at 3/3
+    var countText = countEl ? countEl.textContent : '';
+    var m = countText.match(/(\d+)\s*\/\s*(\d+)/);
+    if (m && parseInt(m[1]) >= parseInt(m[2])) return; // Already complete
+    // Click Capture 3 times (idempotent — extra clicks after 3 are ignored)
+    __rotatingActive = true;
+    for (var rc = 0; rc < 3; rc++) {
+      captureBtn.click();
+    }
+    actions.push('Rotating: clicked Capture 3 times');
+  })();
+
+  // Pattern 5b: Auto-solve puzzle_solve — parse math, compute answer, fill input, click Solve
+  // The puzzle shows "A + B = ?" where A = 10 + (step % 20), B = 5 + (step % 15)
+  (function() {
+    var puzzleInput = document.getElementById('puzzle-input');
+    var solveBtn = document.getElementById('puzzle-solve');
+    if (!puzzleInput || !solveBtn) return;
+    // Parse the math expression from the page (e.g., "27 + 7 = ?")
+    var bodyText = document.body ? document.body.innerText : '';
+    var mathMatch = bodyText.match(/(\d+)\s*\+\s*(\d+)\s*=\s*\?/);
+    if (!mathMatch) return;
+    var answer = parseInt(mathMatch[1]) + parseInt(mathMatch[2]);
+    // Fill input using native setter for React compatibility
+    var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    nativeSetter.call(puzzleInput, String(answer));
+    puzzleInput.dispatchEvent(new Event('input', { bubbles: true }));
+    puzzleInput.dispatchEvent(new Event('change', { bubbles: true }));
+    // Click Solve button
+    solveBtn.click();
+    actions.push('Puzzle: computed ' + mathMatch[1] + ' + ' + mathMatch[2] + ' = ' + answer + ' and clicked Solve');
+  })();
+
   // Pattern 5: Auto-solve drag_drop — dispatch drop events on each empty slot
   // The drop handler doesn't check which piece was dropped, just fills the slot
   (function() {
@@ -331,6 +372,8 @@ function(options) {
     var seqActions = [];
     if (clickBtn) { clickBtn.click(); seqActions.push('click'); }
     if (hoverArea && !window.__seqHoverDone) {
+      // Scroll to top first so getBoundingClientRect gives viewport-relative coords for CDP mouse.move()
+      window.scrollTo(0, 0);
       // Store coordinates for real CDP mouse movement (dispatchEvent doesn't trigger mouseenter listener)
       var rect = hoverArea.getBoundingClientRect();
       window.__seqHoverCoords = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
@@ -868,7 +911,12 @@ function(options) {
   if (window.__sequencePending) {
     actions.push('Sequence pending — skipping auto-submit');
   }
-  if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted && !window.__sequencePending) {
+  // Don't auto-submit if rotating challenge is active — the visible random codes are NOT the real code.
+  // The real code only appears after 3 captures (display:block on code element).
+  if (__rotatingActive) {
+    actions.push('Rotating active — skipping auto-submit');
+  }
+  if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted && !window.__sequencePending && !__rotatingActive) {
     // Strategy 1: ID-based selectors (local challenge server)
     var codeInput = document.getElementById('code-input');
     var submitBtn = document.getElementById('submit-code');
@@ -877,7 +925,7 @@ function(options) {
     if (!codeInput) {
       document.querySelectorAll('input[placeholder*="code" i], input[placeholder*="character" i]').forEach(function(inp) {
         if (codeInput) return;
-        if (inp.id === 'base64-input' || inp.id === 'seq-type-input') return;
+        if (inp.id === 'base64-input' || inp.id === 'seq-type-input' || inp.id === 'puzzle-input') return;
         codeInput = inp;
       });
     }
@@ -890,6 +938,8 @@ function(options) {
       var bestCode = foundCodes[0];
       // Only submit if input is empty or has the same code (avoid double-submit)
       if (!codeInput.value || codeInput.value === bestCode) {
+        // Scroll input into view first — filler content may push it way below viewport
+        try { codeInput.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
         // Set value using native setter to trigger React/framework change handlers
         var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
         nativeInputValueSetter.call(codeInput, bestCode);
