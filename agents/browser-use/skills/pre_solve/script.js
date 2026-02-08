@@ -551,7 +551,7 @@ function(options) {
     if (!b64Input) b64Input = document.querySelector('input[placeholder*="code" i][maxlength="6"], input[placeholder*="char" i]');
     if (b64Input && b64Input.value.length < 6) {
       var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      nativeSetter.call(b64Input, 'AAAAAA');
+      nativeSetter.call(b64Input, '000000');  // Use zeros — not in challenge charset, won't be found by code extraction
       b64Input.dispatchEvent(new Event('input', { bubbles: true }));
       b64Input.dispatchEvent(new Event('change', { bubbles: true }));
       actions.push('Base64: filled input with dummy code');
