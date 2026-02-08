@@ -150,25 +150,20 @@ function(options) {
   }
 
   // -----------------------------------------------------------------------
-  // Section B: Challenge-specific interaction solvers
+  // Section B: Web interaction patterns
   // -----------------------------------------------------------------------
 
-  // B1: Rotating code — click Capture button 3 times to reveal the real code
+  // B1: Repeated capture — click Capture button N times to complete a collection
   var __rotatingActive = false;
   (function() {
-    var captureBtn = document.getElementById('rotating-capture');
-    var countEl = document.getElementById('rotating-count');
-    // Fallback: find Capture button and Captures count by text
-    if (!captureBtn) {
-      document.querySelectorAll('button').forEach(function(btn) {
-        if (!captureBtn && /^capture\b/i.test(btn.textContent.trim()) && !btn.disabled) captureBtn = btn;
-      });
-    }
-    if (!countEl) {
-      document.querySelectorAll('p, span, div').forEach(function(el) {
-        if (!countEl && /captures?:\s*\d+\s*\/\s*\d+/i.test(el.textContent.trim())) countEl = el;
-      });
-    }
+    var captureBtn = null;
+    var countEl = null;
+    document.querySelectorAll('button').forEach(function(btn) {
+      if (!captureBtn && /^capture\b/i.test(btn.textContent.trim()) && !btn.disabled) captureBtn = btn;
+    });
+    document.querySelectorAll('p, span, div').forEach(function(el) {
+      if (!countEl && /captures?:\s*\d+\s*\/\s*\d+/i.test(el.textContent.trim())) countEl = el;
+    });
     if (!captureBtn) return;
     // Check if captures are already at 3/3 (via count element or body text)
     var countText = countEl ? countEl.textContent : (document.body ? document.body.innerText : '');
@@ -185,29 +180,25 @@ function(options) {
     actions.push('Rotating: clicked Capture 3 times');
   })();
 
-  // B2: Math puzzle — parse expression, compute answer, fill input, click Solve
+  // B2: Form computation — parse expression, compute answer, fill input, click Solve
   (function() {
-    // Parse the math expression first to confirm this is a puzzle challenge
+    // Parse the math expression first to confirm this is a computation challenge
     var bodyText = document.body ? document.body.innerText : '';
     var mathMatch = bodyText.match(/(\d+)\s*\+\s*(\d+)\s*=\s*\?/);
     if (!mathMatch) return;
     var answer = parseInt(mathMatch[1]) + parseInt(mathMatch[2]);
-    // Find puzzle input — try ID first, then fallback to text-based selectors
-    var puzzleInput = document.getElementById('puzzle-input');
-    if (!puzzleInput) {
-      document.querySelectorAll('input[type="text"], input[type="number"]').forEach(function(inp) {
-        if (puzzleInput) return;
-        var ph = (inp.placeholder || '').toLowerCase();
-        if (ph.indexOf('answer') !== -1 || ph.indexOf('enter') !== -1) puzzleInput = inp;
-      });
-    }
-    // Find Solve button — try ID first, then text match
-    var solveBtn = document.getElementById('puzzle-solve');
-    if (!solveBtn) {
-      document.querySelectorAll('button').forEach(function(btn) {
-        if (!solveBtn && /^solve$/i.test(btn.textContent.trim()) && !btn.disabled) solveBtn = btn;
-      });
-    }
+    // Find answer input by placeholder text
+    var puzzleInput = null;
+    document.querySelectorAll('input[type="text"], input[type="number"]').forEach(function(inp) {
+      if (puzzleInput) return;
+      var ph = (inp.placeholder || '').toLowerCase();
+      if (ph.indexOf('answer') !== -1 || ph.indexOf('enter') !== -1) puzzleInput = inp;
+    });
+    // Find Solve button by text
+    var solveBtn = null;
+    document.querySelectorAll('button').forEach(function(btn) {
+      if (!solveBtn && /^solve$/i.test(btn.textContent.trim()) && !btn.disabled) solveBtn = btn;
+    });
     if (!puzzleInput || !solveBtn) return;
     setInputValue(puzzleInput, String(answer));
     solveBtn.click();
@@ -248,8 +239,9 @@ function(options) {
     var pieces = document.querySelectorAll('[draggable="true"]');
     var slots = [];
     document.querySelectorAll('div').forEach(function(el) {
-      var cls = el.className || '';
-      if (typeof cls === 'string' && cls.includes('w-16') && cls.includes('h-16') && cls.includes('border-dashed')) {
+      var s = window.getComputedStyle(el);
+      if (s.borderStyle === 'dashed' && el.offsetWidth >= 40 && el.offsetHeight >= 40 &&
+          el.offsetWidth <= 120 && el.offsetHeight <= 120 && !el.querySelector('[draggable="true"]')) {
         slots.push(el);
       }
     });
@@ -277,9 +269,12 @@ function(options) {
           setTimeout(function() {
             var curSlots = [];
             document.querySelectorAll('div').forEach(function(el) {
-              var cls = el.className || '';
-              if (typeof cls === 'string' && cls.includes('w-16') && cls.includes('h-16') &&
-                  (cls.includes('border-dashed') || cls.includes('border-green'))) {
+              var s = window.getComputedStyle(el);
+              // Match dashed (empty) or solid (filled) bordered square containers
+              if ((s.borderStyle === 'dashed' || s.borderStyle === 'solid') &&
+                  el.offsetWidth >= 40 && el.offsetHeight >= 40 &&
+                  el.offsetWidth <= 120 && el.offsetHeight <= 120 &&
+                  !el.querySelector('[draggable="true"]')) {
                 curSlots.push(el);
               }
             });
@@ -304,12 +299,11 @@ function(options) {
   (function() {
     var canvas = document.querySelector('canvas.cursor-crosshair, canvas[class*="crosshair"], canvas');
     if (!canvas) return;
-    // Check for stroke counter (canvas challenge) or gesture-complete button
+    // Check for stroke counter or completion button
     var bodyText = document.body ? document.body.innerText : '';
     var strokeMatch = bodyText.match(/(\d+)\s*\/\s*(\d+)\s*strokes?/i);
-    var gestureBtn = document.getElementById('gesture-complete');
-    // Skip if no gesture button and no stroke counter and canvas doesn't look like a challenge
-    if (!gestureBtn && !strokeMatch && !bodyText.match(/draw|stroke|canvas.*challenge/i)) return;
+    // Skip if no stroke counter and canvas doesn't look like a drawing challenge
+    if (!strokeMatch && !bodyText.match(/draw|stroke|canvas.*challenge|gesture/i)) return;
 
     var rect = canvas.getBoundingClientRect();
     var cx = rect.left + rect.width / 2;
@@ -345,23 +339,18 @@ function(options) {
       canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: endX, clientY: endY }));
     }
 
-    // Try clicking Complete button (gesture challenge)
-    gestureBtn = document.getElementById('gesture-complete');
-    if (gestureBtn && !gestureBtn.disabled) {
-      gestureBtn.click();
-      actions.push('Auto-solved gesture: drew + clicked Complete');
-    } else {
-      // Also try "Complete Challenge" button text
-      document.querySelectorAll('button').forEach(function(btn) {
-        var t = btn.textContent.trim();
-        if (/complete.*challenge/i.test(t) && !btn.disabled) {
-          btn.click();
-          actions.push('Auto-solved canvas: drew + clicked Complete Challenge');
-        }
-      });
-      if (strokesNeeded > 0) {
-        actions.push('Canvas: drew ' + Math.min(strokesNeeded + 1, 6) + ' strokes');
+    // Try clicking Complete/Done button by text
+    var completedCanvas = false;
+    document.querySelectorAll('button').forEach(function(btn) {
+      var t = btn.textContent.trim();
+      if (/complete|done|finish/i.test(t) && !btn.disabled && !completedCanvas) {
+        btn.click();
+        completedCanvas = true;
+        actions.push('Canvas: drew + clicked "' + t + '"');
       }
+    });
+    if (!completedCanvas && strokesNeeded > 0) {
+      actions.push('Canvas: drew ' + Math.min(strokesNeeded + 1, 6) + ' strokes');
     }
   })();
 
@@ -386,7 +375,7 @@ function(options) {
     });
   })();
 
-  // B6: Split parts — click scattered UI fragments to assemble the code
+  // B6: Scattered clickables — click scattered UI fragments to assemble content
   (function() {
     // Only run if split parts challenge is active
     var bodyText = document.body ? document.body.innerText : '';
@@ -395,9 +384,18 @@ function(options) {
     var parts = [];
     // Strategy 1: data-part attribute (source code uses this)
     parts = document.querySelectorAll('[data-part]');
-    // Strategy 2: class-based selectors
+    // Strategy 2: absolute-positioned elements with colored backgrounds
     if (parts.length < 2) {
-      parts = document.querySelectorAll('[class*="absolute"][class*="bg-yellow"], .absolute.bg-yellow-400');
+      var colorParts = [];
+      document.querySelectorAll('div, span').forEach(function(el) {
+        var s = window.getComputedStyle(el);
+        if (s.position === 'absolute' && s.cursor === 'pointer' &&
+            s.backgroundColor && s.backgroundColor !== 'rgba(0, 0, 0, 0)' &&
+            s.backgroundColor !== 'transparent') {
+          colorParts.push(el);
+        }
+      });
+      if (colorParts.length >= 2) parts = colorParts;
     }
     // Strategy 3: Find elements containing "Part N:" text with cursor pointer
     if (parts.length < 2) {
@@ -443,22 +441,19 @@ function(options) {
     // Must match sequence challenge but NOT keyboard sequence challenge
     if (/keyboard.*sequence/i.test(bodyText)) return; // Skip keyboard_sequence challenges
     if (!/sequence.*challenge|complete.*(?:all\s+)?\d+.*actions/i.test(bodyText)) return;
-    // Find sequence action elements by ID first, then data-attributes, then text fallback
-    var clickBtn = document.getElementById('seq-click-btn');
-    var hoverArea = document.getElementById('seq-hover-area') || document.querySelector('[data-hover-area]');
-    var typeInput = document.getElementById('seq-type-input');
-    var scrollBox = document.getElementById('seq-scroll-box') || document.querySelector('[data-scroll-box]');
-    var completeBtn = document.getElementById('seq-complete-btn');
-    // Fallback: find by text/attributes if IDs and data-attrs missing
-    if (!clickBtn || !completeBtn) {
-      document.querySelectorAll('button').forEach(function(btn) {
-        var t = btn.textContent.trim().toLowerCase();
-        if (!clickBtn && (t === 'click me' || t === 'click' || /^click\s/i.test(t)) && !btn.disabled) {
-          clickBtn = btn;
-        }
-        if (!completeBtn && /^complete/i.test(t)) completeBtn = btn;
-      });
-    }
+    // Find sequence action elements by text/attributes
+    var clickBtn = null;
+    var hoverArea = document.querySelector('[data-hover-area]');
+    var typeInput = null;
+    var scrollBox = document.querySelector('[data-scroll-box]');
+    var completeBtn = null;
+    document.querySelectorAll('button').forEach(function(btn) {
+      var t = btn.textContent.trim().toLowerCase();
+      if (!clickBtn && (t === 'click me' || t === 'click' || /^click\s/i.test(t)) && !btn.disabled) {
+        clickBtn = btn;
+      }
+      if (!completeBtn && /^complete/i.test(t)) completeBtn = btn;
+    });
     if (!hoverArea) {
       document.querySelectorAll('div, span').forEach(function(el) {
         var text = el.textContent.trim();
@@ -544,8 +539,8 @@ function(options) {
 
   // B10: Scroll reveal — scroll page to trigger scroll-position-based reveals
   (function() {
-    // Look for scroll instructions in the challenge area, not entire body
-    var challengeArea = document.querySelector('.max-w-6xl') || document.querySelector('main') || document.body;
+    // Look for scroll instructions in the main content area, not entire body
+    var challengeArea = document.querySelector('main') || document.querySelector('[role="main"]') || document.body;
     var headings = challengeArea.querySelectorAll('p, h1, h2, h3, strong, div.text-sm');
     var hasScrollChallenge = false;
     headings.forEach(function(el) {
@@ -623,14 +618,11 @@ function(options) {
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/shadow.*dom|shadow.*level|navigate.*shadow/i.test(bodyText)) return;
-    // Find the shadow container
-    var container = document.getElementById('shadow-container');
-    if (!container) {
-      // Fallback: find any element with a shadowRoot
-      document.querySelectorAll('div').forEach(function(el) {
-        if (el.shadowRoot && !container) container = el.parentElement || el;
-      });
-    }
+    // Find the shadow container — look for any element with a shadowRoot
+    var container = null;
+    document.querySelectorAll('div').forEach(function(el) {
+      if (el.shadowRoot && !container) container = el.parentElement || el;
+    });
     if (!container) return;
     // Traverse up to 5 levels of nested shadow DOM
     var current = container;
@@ -666,16 +658,14 @@ function(options) {
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/mutation|trigger.*mutation|mutations?\s*triggered/i.test(bodyText)) return;
-    // Find trigger button and reveal button
-    var triggerBtn = document.getElementById('mutate-btn');
-    var revealBtn = document.getElementById('mutation-reveal');
-    if (!triggerBtn) {
-      document.querySelectorAll('button').forEach(function(btn) {
-        var t = btn.textContent.trim().toLowerCase();
-        if (/trigger|mutate/i.test(t) && !btn.disabled) triggerBtn = btn;
-        if (/reveal/i.test(t)) revealBtn = btn;
-      });
-    }
+    // Find trigger button and reveal button by text
+    var triggerBtn = null;
+    var revealBtn = null;
+    document.querySelectorAll('button').forEach(function(btn) {
+      var t = btn.textContent.trim().toLowerCase();
+      if (/trigger|mutate/i.test(t) && !btn.disabled) triggerBtn = btn;
+      if (/reveal/i.test(t)) revealBtn = btn;
+    });
     if (triggerBtn) {
       // Check progress: "N / M" pattern
       var progressMatch = bodyText.match(/(\d+)\s*\/\s*(\d+)\s*(?:mutations?|triggered)/i);
@@ -700,12 +690,12 @@ function(options) {
     }
   })();
 
-  // B15: Base64/encoded — fill input with dummy value, then click Reveal
+  // B15: Encoded content — decode base64, fill input, click Reveal
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/base64|decode|encoded/i.test(bodyText)) return;
     // Decode base64 for reporting
-    document.querySelectorAll('.font-mono, code, pre, [class*="code"]').forEach(function(el) {
+    document.querySelectorAll('code, pre, [class*="code"], [class*="mono"]').forEach(function(el) {
       var text = el.textContent.trim();
       if (/^[A-Za-z0-9+/=]{8,}$/.test(text)) {
         try {
@@ -714,20 +704,17 @@ function(options) {
         } catch(e) {}
       }
     });
-    // Fill the input with a dummy 6-char code so Reveal button works
-    var b64Input = document.getElementById('base64-input');
-    if (!b64Input) b64Input = document.querySelector('input[placeholder*="code" i][maxlength="6"], input[placeholder*="char" i]');
+    // Fill input with a dummy value so Reveal button works
+    var b64Input = document.querySelector('input[placeholder*="code" i][maxlength="6"], input[placeholder*="char" i]');
     if (b64Input && b64Input.value.length < 6) {
       setInputValue(b64Input, '000000');  // Zeros: not in challenge charset, won't be found by code extraction
-      actions.push('Base64: filled input with dummy code');
+      actions.push('Encoded: filled input with dummy code');
     }
-    // Click Reveal button
-    var revealBtn = document.getElementById('base64-reveal');
-    if (!revealBtn) {
-      document.querySelectorAll('button').forEach(function(btn) {
-        if (/^reveal$/i.test(btn.textContent.trim())) revealBtn = btn;
-      });
-    }
+    // Click Reveal button by text
+    var revealBtn = null;
+    document.querySelectorAll('button').forEach(function(btn) {
+      if (/^reveal$/i.test(btn.textContent.trim())) revealBtn = btn;
+    });
     if (revealBtn && !revealBtn.disabled) {
       revealBtn.click();
       actions.push('Base64: clicked Reveal');
@@ -765,8 +752,8 @@ function(options) {
       }
     });
 
-    // Source 4: Visible codes in code-styled elements
-    var codeElements = document.querySelectorAll('.font-mono, [class*="code"], code, pre');
+    // Source 4: Visible codes in code-styled elements (monospace font, code tags)
+    var codeElements = document.querySelectorAll('code, pre, [class*="code"], [class*="mono"]');
     codeElements.forEach(function(el) {
       var text = el.textContent.trim();
       var codeMatch = text.match(codePattern);
@@ -776,7 +763,7 @@ function(options) {
     });
 
     // Source 5: Bold/highlighted text
-    document.querySelectorAll('.font-bold, strong, b, [class*="highlight"]').forEach(function(el) {
+    document.querySelectorAll('strong, b, [class*="highlight"], [class*="bold"]').forEach(function(el) {
       var text = el.textContent.trim();
       var codeMatch = text.match(codePattern);
       if (codeMatch && el.offsetWidth > 0 && foundCodes.indexOf(codeMatch[0]) === -1) {
@@ -851,12 +838,11 @@ function(options) {
       });
     })();
 
-    // Source 10: React fiber state extraction (universal — works for all challenge types)
-    // The live site is a React app — challenge codes are stored in component state.
-    // Walk the React fiber tree to find the challenge component (Gv) with matching stepNum.
-    // Uses step-matching to avoid stale codes from previous steps after SPA transitions.
+    // Source 10: React fiber state extraction
+    // React apps store component state in a fiber tree. Walk the fiber tree to find
+    // 6-char code strings in memoizedState, using step-matching to filter stale codes.
     (function() {
-      // Detect current step from page text
+      // Detect current step from page text for stale-code filtering
       var pageText = document.body ? document.body.innerText : '';
       var stepMatch = pageText.match(/step\s+(\d+)\s*(?:of|\/)\s*(\d+)/i);
       var currentStep = stepMatch ? parseInt(stepMatch[1]) : null;
@@ -882,23 +868,29 @@ function(options) {
         return codes;
       }
 
-      // Strategy A: Walk UP from challenge element (fast, works when DOM is fresh)
-      var challengeArea = document.querySelector('.max-w-6xl') || document.querySelector('main');
+      // Helper: check if a fiber's props contain a step number matching the current page step
+      function fiberMatchesStep(fiber) {
+        var props = fiber.memoizedProps;
+        if (!props || typeof props !== 'object') return false;
+        // Look for any numeric prop that could be a step indicator
+        for (var key in props) {
+          if (/step/i.test(key) && typeof props[key] === 'number') {
+            return currentStep === null || props[key] === currentStep;
+          }
+        }
+        return true; // No step prop found — don't filter
+      }
+
+      // Strategy A: Walk UP from a content element in main area
+      var challengeArea = document.querySelector('main') || document.querySelector('[role="main"]');
       var startEl = null;
       if (challengeArea) {
-        startEl = challengeArea.querySelector('[class*="bg-indigo"]') ||
-                  challengeArea.querySelector('[class*="bg-green"]') ||
-                  challengeArea.querySelector('[class*="bg-blue"]') ||
-                  challengeArea.querySelector('[class*="bg-yellow"]') ||
-                  challengeArea.querySelector('[class*="bg-purple"]') ||
-                  challengeArea.querySelector('[class*="bg-red"]') ||
-                  challengeArea.querySelector('[class*="bg-orange"]') ||
-                  challengeArea.querySelector('[class*="bg-pink"]') ||
-                  challengeArea.querySelector('canvas') ||
-                  challengeArea.querySelector('[class*="border-dashed"]') ||
+        // Pick any interactive or content element as a starting point for fiber walk-up
+        startEl = challengeArea.querySelector('canvas') ||
                   challengeArea.querySelector('[draggable="true"]') ||
-                  challengeArea.querySelector('[class*="border-2"]') ||
-                  challengeArea.querySelector('strong');
+                  challengeArea.querySelector('button') ||
+                  challengeArea.querySelector('strong') ||
+                  challengeArea.querySelector('p');
       }
 
       var reactCodes = [];
@@ -906,18 +898,15 @@ function(options) {
         var fiberKey = Object.keys(startEl).find(function(k) { return k.indexOf('__reactFiber') === 0; });
         if (fiberKey) {
           var fiber = startEl[fiberKey];
-          // Walk UP: ONLY extract codes from the challenge component (has config+stepNum props)
-          // Skip generic intermediate fibers to avoid stale codes from other components
+          // Walk UP and extract codes from fibers that have state
           for (var i = 0; i < 30 && fiber; i++) {
-            var props = fiber.memoizedProps;
-            if (props && props.config && typeof props.stepNum === 'number') {
-              // Step-match: only use code if stepNum matches current page step
-              if (currentStep === null || props.stepNum === currentStep) {
-                var codes = extractCodes(fiber);
-                for (var ci = 0; ci < codes.length; ci++) {
-                  if (reactCodes.indexOf(codes[ci]) === -1) reactCodes.push(codes[ci]);
-                }
-                // Also check immediate children (some challenges store code in child components)
+            if (fiberMatchesStep(fiber)) {
+              var codes = extractCodes(fiber);
+              for (var ci = 0; ci < codes.length; ci++) {
+                if (reactCodes.indexOf(codes[ci]) === -1) reactCodes.push(codes[ci]);
+              }
+              // Also check child components which may hold codes
+              if (codes.length > 0) {
                 var childStack = [fiber.child];
                 var childVisited = 0;
                 while (childStack.length > 0 && childVisited < 50) {
@@ -931,16 +920,15 @@ function(options) {
                   if (cf.child) childStack.push(cf.child);
                   if (cf.sibling) childStack.push(cf.sibling);
                 }
+                break; // Found codes, stop walking up
               }
-              break; // Found the challenge component, stop walking
             }
             fiber = fiber.return;
           }
         }
       }
 
-      // Strategy B: If walk-up found nothing (or only stale codes), walk DOWN from #root
-      // This catches cases where the DOM element is stale but the fiber tree has updated
+      // Strategy B: If walk-up found nothing (or only stale codes), walk DOWN from React root
       if (reactCodes.length === 0 || (allSubmittedCodes.length > 0 &&
           reactCodes.every(function(c) { return allSubmittedCodes.indexOf(c) !== -1; }))) {
         var rootEl = document.getElementById('root') || document.getElementById('__next');
@@ -955,15 +943,11 @@ function(options) {
               var f = stack.pop();
               if (!f) continue;
               visited++;
-              // Look for challenge component with matching stepNum
-              var fp = f.memoizedProps;
-              if (fp && fp.config && typeof fp.stepNum === 'number') {
-                if (currentStep === null || fp.stepNum === currentStep) {
-                  var rootCodes = extractCodes(f);
-                  for (var rci = 0; rci < rootCodes.length; rci++) {
-                    if (reactCodes.indexOf(rootCodes[rci]) === -1) {
-                      reactCodes.push(rootCodes[rci]);
-                    }
+              if (fiberMatchesStep(f)) {
+                var rootCodes = extractCodes(f);
+                for (var rci = 0; rci < rootCodes.length; rci++) {
+                  if (reactCodes.indexOf(rootCodes[rci]) === -1) {
+                    reactCodes.push(rootCodes[rci]);
                   }
                 }
               }
@@ -1034,21 +1018,25 @@ function(options) {
     actions.push('Drag-drop pending — skipping auto-submit');
   }
   if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted && !window.__sequencePending && !__rotatingActive && !__dragDropPending) {
-    // Strategy 1: ID-based selectors (local challenge server)
+    // Find the code submission input — look for inputs near a "Submit Code" button
     var codeInput = document.getElementById('code-input');
     var submitBtn = document.getElementById('submit-code');
-    // Strategy 2: Attribute/text-based selectors (live Netlify site)
-    // Exclude challenge-specific inputs (#base64-input, #seq-type-input) to avoid submitting to wrong field
-    if (!codeInput) {
-      document.querySelectorAll('input[placeholder*="code" i], input[placeholder*="character" i]').forEach(function(inp) {
-        if (codeInput) return;
-        if (inp.id === 'base64-input' || inp.id === 'seq-type-input' || inp.id === 'puzzle-input') return;
-        codeInput = inp;
-      });
-    }
     if (!submitBtn) {
       document.querySelectorAll('button').forEach(function(btn) {
         if (btn.textContent.trim() === 'Submit Code') submitBtn = btn;
+      });
+    }
+    if (!codeInput) {
+      document.querySelectorAll('input[placeholder*="code" i], input[placeholder*="character" i]').forEach(function(inp) {
+        if (codeInput) return;
+        // Skip inputs that already have a value and aren't near the submit button
+        // (they belong to other interactive elements on the page, not the submission form)
+        if (inp.value) {
+          var inpParent = inp.closest('div') || inp.parentElement;
+          var btnParent = submitBtn ? (submitBtn.closest('div') || submitBtn.parentElement) : null;
+          if (submitBtn && inpParent && btnParent && !inpParent.contains(submitBtn) && !btnParent.contains(inp)) return;
+        }
+        codeInput = inp;
       });
     }
     if (codeInput && submitBtn) {
@@ -1062,12 +1050,10 @@ function(options) {
         var theSubmitBtn = submitBtn;
         setTimeout(function() {
           // Re-query submit button (React may have re-rendered)
-          var freshBtn = document.getElementById('submit-code');
-          if (!freshBtn) {
-            document.querySelectorAll('button').forEach(function(btn) {
-              if (btn.textContent.trim() === 'Submit Code') freshBtn = btn;
-            });
-          }
+          var freshBtn = document.getElementById('submit-code') || null;
+          document.querySelectorAll('button').forEach(function(btn) {
+            if (!freshBtn && btn.textContent.trim() === 'Submit Code') freshBtn = btn;
+          });
           if (freshBtn) theSubmitBtn = freshBtn;
           if (!theSubmitBtn.disabled) {
             theSubmitBtn.click();

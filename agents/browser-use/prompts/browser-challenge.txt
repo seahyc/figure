@@ -1,20 +1,13 @@
 Complete all 30 steps of the browser challenge.
 
 PATTERN FOR EACH STEP:
-1. Check #__pre_solve_results first — it may have already clicked buttons or found the code
-2. Look for the 6-character alphanumeric code (font-mono, font-bold, or highlighted text)
+1. Check #__pre_solve_results first — it may have already found the code and submitted it
+2. Look for the 6-character alphanumeric code (highlighted, bold, or monospace text)
 3. If code is visible, enter it in the input field and click "Submit Code" immediately
-4. If code is NOT visible, determine the challenge type and use the right tool:
-   - Scroll challenge: evaluate("window.__skills.scroll_to({position:'bottom'})")
-   - Hover challenge: hover(index=N) on the hover target
-   - Shadow DOM: evaluate("window.__skills.shadow_dom()")
-   - Canvas/drawing: draw(index=N, strokes=3)
-   - Keyboard: send_keys("ArrowUp ArrowDown ArrowLeft ArrowRight")
-   - Math/calculation: evaluate("window.__skills.compute({math: 'EXPRESSION'})")
-   - Encoded/base64: evaluate("window.__skills.compute({decode: 'BASE64_STRING'})")
-   - Reversed string: evaluate("window.__skills.compute({reverse: 'STRING'})")
-   - Drag-drop: drag(source=N, target=M)
-   - Hidden DOM: evaluate("window.__skills.search_dom({text:'pattern'})")
+4. If code is NOT visible, interact with the page to reveal it:
+   - Click buttons, hover elements, scroll the page
+   - Use evaluate() for canvas drawing, keyboard input, or DOM searches
+   - If stuck, try: evaluate("window.__skills.search_dom({text:'[A-Za-z0-9]{6}', regex:true})")
 5. After getting the code, enter it and click "Submit Code"
 6. Wait for the page to advance, then repeat
 
@@ -22,6 +15,6 @@ KEY RULES:
 - NEVER click decoy buttons: "Next Page", "Go Forward", "Continue", "Next Step", "Click Me", etc.
 - ONLY click "Submit Code" button to advance
 - Use compute skill for ALL math — never do mental arithmetic on multi-digit numbers
-- If stuck for 3+ actions on a step, try evaluate("window.__skills.search_dom({text:'[A-Za-z0-9]{6}', regex:true})")
+- If pre_solve already submitted the code, just wait for the next step
 
 NEVER call done() until all 30 steps are complete.
