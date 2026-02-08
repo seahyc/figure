@@ -28,6 +28,15 @@ function(options) {
   var oldResults = document.getElementById('__pre_solve_results');
   if (oldResults) oldResults.remove();
 
+  // Detect current step number for step-change tracking
+  var stepText = document.body ? document.body.innerText : '';
+  var stepDetect = stepText.match(/step\s+(\d+)\s*(?:of|\/)\s*(\d+)/i);
+  var detectedStep = stepDetect ? parseInt(stepDetect[1]) : null;
+  if (detectedStep !== null && window.__preSolveLastStep && window.__preSolveLastStep !== detectedStep) {
+    actions.push('Step changed: ' + window.__preSolveLastStep + ' -> ' + detectedStep);
+  }
+  if (detectedStep !== null) window.__preSolveLastStep = detectedStep;
+
   // Track all previously submitted codes to prevent re-submitting stale codes from previous steps
   // This array persists across pre_solve invocations via window global
   var allSubmittedCodes = window.__preSolveSubmittedCodes || [];
@@ -969,20 +978,24 @@ function(options) {
       for (var ri = 0; ri < reactCodes.length; ri++) {
         if (foundCodes.indexOf(reactCodes[ri]) === -1) {
           foundCodes.push(reactCodes[ri]);
-          actions.push('React state code: ' + reactCodes[ri]);
         }
       }
     })();
 
-    if (foundCodes.length > 0) {
-      actions.push('Found potential codes: ' + foundCodes.join(', '));
-    }
+    // (code reporting moved to after stale-code filtering below)
   }
 
   // Auto-submit: if we found a code, type it and click Submit Code
   // Filter out ALL previously submitted codes to prevent re-submitting stale codes
+  var preFilterCount = foundCodes.length;
   if (allSubmittedCodes.length > 0) {
     foundCodes = foundCodes.filter(function(c) { return allSubmittedCodes.indexOf(c) === -1; });
+  }
+  // Report codes AFTER filtering so the LLM only sees actionable (new) codes
+  if (foundCodes.length > 0) {
+    actions.push('Found new codes: ' + foundCodes.join(', '));
+  } else if (preFilterCount > 0) {
+    actions.push('Only found previously-submitted codes — current challenge not yet solved');
   }
   // Skip if "Code accepted" is still visible AND the accepted code matches what we'd submit
   // (Don't block submission of a genuinely NEW code just because "Code accepted" text lingers)
