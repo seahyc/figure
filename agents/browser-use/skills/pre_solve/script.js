@@ -244,7 +244,69 @@ function(options) {
     }
   })();
 
-  // Pattern 9: (removed — sequence challenges need multiple action types, better handled by LLM)
+  // Pattern 9: Auto-solve sequence challenge — 4 action types: click, hover, type, scroll
+  // Phase 1 dispatches all 4 events; Phase 2 (5s later) clicks Complete button after hover timer fires
+  (function() {
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/sequence.*challenge|complete.*actions|action.*sequence/i.test(bodyText)) return;
+    // Find sequence action elements by ID or text
+    var clickBtn = document.getElementById('seq-click-btn');
+    var hoverArea = document.getElementById('seq-hover-area');
+    var typeInput = document.getElementById('seq-type-input');
+    var scrollBox = document.getElementById('seq-scroll-box');
+    var completeBtn = document.getElementById('seq-complete-btn');
+    // Fallback: find by text/attributes if IDs missing
+    if (!clickBtn) {
+      document.querySelectorAll('button').forEach(function(btn) {
+        var t = btn.textContent.trim().toLowerCase();
+        if (t === 'click me' || t === 'click' || /^click\s/i.test(t)) {
+          if (!clickBtn && !btn.disabled) clickBtn = btn;
+        }
+        if (/^complete$/i.test(t)) completeBtn = btn;
+      });
+    }
+    if (!hoverArea) {
+      document.querySelectorAll('div, span').forEach(function(el) {
+        if (/hover here|hover.*area/i.test(el.textContent.trim()) && el.textContent.trim().length < 40) {
+          if (!hoverArea) hoverArea = el;
+        }
+      });
+    }
+    if (!typeInput) typeInput = document.querySelector('input[type="text"]');
+    if (!scrollBox) {
+      document.querySelectorAll('div').forEach(function(el) {
+        var s = window.getComputedStyle(el);
+        if (s.overflow === 'auto' || s.overflow === 'scroll' || s.overflowY === 'auto' || s.overflowY === 'scroll') {
+          if (el.scrollHeight > el.clientHeight + 10) scrollBox = el;
+        }
+      });
+    }
+    // Dispatch all 4 action events
+    var seqActions = [];
+    if (clickBtn) { clickBtn.click(); seqActions.push('click'); }
+    if (hoverArea) {
+      hoverArea.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
+      hoverArea.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }));
+      seqActions.push('hover-enter');
+    }
+    if (typeInput) {
+      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      nativeSetter.call(typeInput, 'X');
+      typeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      seqActions.push('type');
+    }
+    if (scrollBox) {
+      scrollBox.scrollTop = 100;
+      scrollBox.dispatchEvent(new Event('scroll', { bubbles: true }));
+      seqActions.push('scroll');
+    }
+    // On Phase 2 (5s later), the hover timer (800ms) has already fired, so click Complete
+    if (completeBtn && !completeBtn.disabled) {
+      completeBtn.click();
+      seqActions.push('complete');
+    }
+    if (seqActions.length > 0) actions.push('Sequence: ' + seqActions.join(', '));
+  })();
 
   // Pattern 10: Auto-solve service_worker — click Register then Retrieve buttons
   // First pass clicks Register, second pass (after 3.5s delay) clicks Retrieve
@@ -355,6 +417,104 @@ function(options) {
     }
   })();
 
+  // Pattern 16: Auto-solve shadow_dom — traverse nested shadowRoot elements and click
+  (function() {
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/shadow.*dom|shadow.*level|navigate.*shadow/i.test(bodyText)) return;
+    // Find the shadow container
+    var container = document.getElementById('shadow-container');
+    if (!container) {
+      // Fallback: find any element with a shadowRoot
+      document.querySelectorAll('div').forEach(function(el) {
+        if (el.shadowRoot && !container) container = el.parentElement || el;
+      });
+    }
+    if (!container) return;
+    // Traverse up to 5 levels of nested shadow DOM
+    var current = container;
+    var clickedLevels = 0;
+    for (var level = 0; level < 5; level++) {
+      var host = null;
+      // Find shadow host inside current element
+      var children = current.querySelectorAll ? current.querySelectorAll('*') : [];
+      for (var ci = 0; ci < children.length; ci++) {
+        if (children[ci].shadowRoot) { host = children[ci]; break; }
+      }
+      if (!host) {
+        // Also check direct children
+        var directKids = current.children || [];
+        for (var di = 0; di < directKids.length; di++) {
+          if (directKids[di].shadowRoot) { host = directKids[di]; break; }
+        }
+      }
+      if (!host || !host.shadowRoot) break;
+      var shadow = host.shadowRoot;
+      // Click the wrapper div inside shadow
+      var wrapper = shadow.querySelector('div');
+      if (wrapper) {
+        wrapper.click();
+        clickedLevels++;
+        current = wrapper; // Move deeper
+      } else break;
+    }
+    if (clickedLevels > 0) actions.push('Shadow DOM: clicked ' + clickedLevels + ' levels');
+  })();
+
+  // Pattern 17: Auto-solve mutation challenge — click trigger button N times + reveal
+  (function() {
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/mutation|trigger.*mutation|mutations?\s*triggered/i.test(bodyText)) return;
+    // Find trigger button and reveal button
+    var triggerBtn = document.getElementById('mutate-btn');
+    var revealBtn = document.getElementById('mutation-reveal');
+    if (!triggerBtn) {
+      document.querySelectorAll('button').forEach(function(btn) {
+        var t = btn.textContent.trim().toLowerCase();
+        if (/trigger|mutate/i.test(t) && !btn.disabled) triggerBtn = btn;
+        if (/reveal/i.test(t)) revealBtn = btn;
+      });
+    }
+    if (triggerBtn) {
+      // Check progress: "N / M" pattern
+      var progressMatch = bodyText.match(/(\d+)\s*\/\s*(\d+)\s*(?:mutations?|triggered)/i);
+      var clicksNeeded = 5; // default
+      if (progressMatch) {
+        clicksNeeded = parseInt(progressMatch[2]) - parseInt(progressMatch[1]);
+      }
+      for (var mi = 0; mi < Math.max(clicksNeeded, 1); mi++) {
+        triggerBtn.click();
+      }
+      actions.push('Mutation: clicked trigger ' + Math.max(clicksNeeded, 1) + ' times');
+    }
+    // Re-find reveal button (may have been enabled by mutations)
+    if (!revealBtn) {
+      document.querySelectorAll('button').forEach(function(btn) {
+        if (/reveal/i.test(btn.textContent.trim()) && !btn.disabled) revealBtn = btn;
+      });
+    }
+    if (revealBtn && !revealBtn.disabled) {
+      revealBtn.click();
+      actions.push('Mutation: clicked Reveal');
+    }
+  })();
+
+  // Pattern 18: Auto-solve encoded_base64 — decode base64 text visible on page
+  (function() {
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/base64|decode|encoded/i.test(bodyText)) return;
+    // Find elements with base64-encoded text (font-mono class or code elements)
+    document.querySelectorAll('.font-mono, code, pre, [class*="code"]').forEach(function(el) {
+      var text = el.textContent.trim();
+      // Base64 string pattern: 8+ characters of A-Za-z0-9+/=
+      if (/^[A-Za-z0-9+/=]{8,}$/.test(text)) {
+        try {
+          var decoded = atob(text);
+          actions.push('Base64 decoded: "' + decoded.substring(0, 40) + '"');
+        } catch(e) {}
+      }
+    });
+  })();
+
   // Pattern 12: Find codes and optionally auto-submit
   // Challenge charset: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I, O, 0, 1)
   var codePattern = /\b[A-HJ-NP-Z2-9]{6}\b/;
@@ -447,6 +607,29 @@ function(options) {
         }
       });
     });
+
+    // Source 9b: Shadow DOM content — search inside open shadow roots for codes
+    (function() {
+      function searchShadow(root, depth) {
+        if (depth > 5) return;
+        var els = root.querySelectorAll('*');
+        for (var si = 0; si < els.length; si++) {
+          var text = els[si].textContent.trim();
+          if (text && text.length <= 20) {
+            var match = text.match(codePattern);
+            if (match && foundCodes.indexOf(match[0]) === -1) {
+              foundCodes.push(match[0]);
+            }
+          }
+          if (els[si].shadowRoot) {
+            searchShadow(els[si].shadowRoot, depth + 1);
+          }
+        }
+      }
+      document.querySelectorAll('*').forEach(function(el) {
+        if (el.shadowRoot) searchShadow(el.shadowRoot, 0);
+      });
+    })();
 
     // Source 10: React fiber state extraction (universal — works for all challenge types)
     // The live site is a React app — challenge codes are stored in component state.

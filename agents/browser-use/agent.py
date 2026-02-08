@@ -470,7 +470,8 @@ def build_tools() -> Tools:
                 return ActionResult(error=f"Could not get position for element {params.index}")
             x, y = rect.x + rect.width / 2, rect.y + rect.height / 2
 
-        await page.mouse.move(x, y)
+        mouse = await page.mouse  # page.mouse is an async property, must await separately
+        await mouse.move(x, y)
         await asyncio.sleep(1.5)  # Let hover effects trigger (needs 1s for hover_reveal, 800ms for sequence)
 
         return ActionResult(extracted_content=f"Hovered over element {params.index}")
@@ -514,12 +515,13 @@ def build_tools() -> Tools:
             return ActionResult(error="Could not get element coordinates")
 
         # Perform drag with smooth movement
-        await page.mouse.move(sx, sy)
-        await page.mouse.down()
+        mouse = await page.mouse  # page.mouse is an async property
+        await mouse.move(sx, sy)
+        await mouse.down()
         for step in range(1, 11):
             frac = step / 10
-            await page.mouse.move(sx + (tx - sx) * frac, sy + (ty - sy) * frac)
-        await page.mouse.up()
+            await mouse.move(sx + (tx - sx) * frac, sy + (ty - sy) * frac)
+        await mouse.up()
 
         return ActionResult(extracted_content=f"Dragged element {params.source} to {params.target}")
 
@@ -548,18 +550,19 @@ def build_tools() -> Tools:
                 return ActionResult(error=f"Could not get bounds for element {params.index}")
             ox, oy, w, h = rect.x, rect.y, rect.width, rect.height
 
+        mouse = await page.mouse  # page.mouse is an async property
         margin = min(20, w * 0.1)
         for i in range(params.strokes):
             y_frac = (i + 1) / (params.strokes + 1)
             sx, sy = ox + margin, oy + h * y_frac
             ex, ey = ox + w - margin, oy + h * y_frac + h * 0.05
 
-            await page.mouse.move(sx, sy)
-            await page.mouse.down()
+            await mouse.move(sx, sy)
+            await mouse.down()
             for step in range(1, 11):
                 frac = step / 10
-                await page.mouse.move(sx + (ex - sx) * frac, sy + (ey - sy) * frac)
-            await page.mouse.up()
+                await mouse.move(sx + (ex - sx) * frac, sy + (ey - sy) * frac)
+            await mouse.up()
 
         return ActionResult(extracted_content=f"Drew {params.strokes} strokes on element {params.index}")
 
