@@ -767,7 +767,7 @@ async def pre_step_cleanup(agent):
         # This catches delayed_reveal (3s timer) and timed challenges without slowing
         # down steps that pre_solve already handled.
         if first_result and "AUTO-SUBMITTED" not in str(first_result):
-            await asyncio.sleep(3.5)
+            await asyncio.sleep(5)
             second_result = await page.evaluate("""() => {
                 if (window.__skills && window.__skills.pre_solve) return window.__skills.pre_solve();
                 return 'no_pre_solve';

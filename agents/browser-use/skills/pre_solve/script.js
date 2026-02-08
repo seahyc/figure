@@ -351,6 +351,7 @@ function(options) {
       var currentStep = stepMatch ? parseInt(stepMatch[1]) : null;
 
       // Helper: extract 6-char codes from a fiber's memoizedState chain
+      // NOTE: Do NOT check fiber.alternate — it may contain stale codes from previous renders
       function extractCodes(fiber) {
         var codes = [];
         if (!fiber || !fiber.memoizedState) return codes;
@@ -394,8 +395,9 @@ function(options) {
         var fiberKey = Object.keys(startEl).find(function(k) { return k.indexOf('__reactFiber') === 0; });
         if (fiberKey) {
           var fiber = startEl[fiberKey];
+          // Walk UP: ONLY extract codes from the challenge component (has config+stepNum props)
+          // Skip generic intermediate fibers to avoid stale codes from other components
           for (var i = 0; i < 30 && fiber; i++) {
-            // Check if this is the challenge component with matching step
             var props = fiber.memoizedProps;
             if (props && props.config && typeof props.stepNum === 'number') {
               // Step-match: only use code if stepNum matches current page step
@@ -406,11 +408,6 @@ function(options) {
                 }
               }
               break; // Found the challenge component, stop walking
-            }
-            // Also check generic state (for non-challenge components)
-            var genCodes = extractCodes(fiber);
-            for (var gi = 0; gi < genCodes.length; gi++) {
-              if (reactCodes.indexOf(genCodes[gi]) === -1) reactCodes.push(genCodes[gi]);
             }
             fiber = fiber.return;
           }
