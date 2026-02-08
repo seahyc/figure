@@ -129,11 +129,25 @@ function(options) {
   (function() {
     var captureBtn = document.getElementById('rotating-capture');
     var countEl = document.getElementById('rotating-count');
-    if (!captureBtn && !countEl) return;
-    // Check if captures are already at 3/3
-    var countText = countEl ? countEl.textContent : '';
-    var m = countText.match(/(\d+)\s*\/\s*(\d+)/);
+    // Fallback: find Capture button and Captures count by text
+    if (!captureBtn) {
+      document.querySelectorAll('button').forEach(function(btn) {
+        if (!captureBtn && /^capture$/i.test(btn.textContent.trim()) && !btn.disabled) captureBtn = btn;
+      });
+    }
+    if (!countEl) {
+      document.querySelectorAll('p, span, div').forEach(function(el) {
+        if (!countEl && /captures?:\s*\d+\s*\/\s*\d+/i.test(el.textContent.trim())) countEl = el;
+      });
+    }
+    if (!captureBtn) return;
+    // Check if captures are already at 3/3 (via count element or body text)
+    var countText = countEl ? countEl.textContent : (document.body ? document.body.innerText : '');
+    var m = countText.match(/captures?:\s*(\d+)\s*\/\s*(\d+)/i);
     if (m && parseInt(m[1]) >= parseInt(m[2])) return; // Already complete
+    // Only activate if this looks like a rotating challenge (rapidly changing code display)
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/rotat|rapid|flash|capture/i.test(bodyText)) return;
     // Click Capture 3 times (idempotent — extra clicks after 3 are ignored)
     __rotatingActive = true;
     for (var rc = 0; rc < 3; rc++) {
@@ -145,14 +159,28 @@ function(options) {
   // Pattern 5b: Auto-solve puzzle_solve — parse math, compute answer, fill input, click Solve
   // The puzzle shows "A + B = ?" where A = 10 + (step % 20), B = 5 + (step % 15)
   (function() {
-    var puzzleInput = document.getElementById('puzzle-input');
-    var solveBtn = document.getElementById('puzzle-solve');
-    if (!puzzleInput || !solveBtn) return;
-    // Parse the math expression from the page (e.g., "27 + 7 = ?")
+    // Parse the math expression first to confirm this is a puzzle challenge
     var bodyText = document.body ? document.body.innerText : '';
     var mathMatch = bodyText.match(/(\d+)\s*\+\s*(\d+)\s*=\s*\?/);
     if (!mathMatch) return;
     var answer = parseInt(mathMatch[1]) + parseInt(mathMatch[2]);
+    // Find puzzle input — try ID first, then fallback to text-based selectors
+    var puzzleInput = document.getElementById('puzzle-input');
+    if (!puzzleInput) {
+      document.querySelectorAll('input[type="text"], input[type="number"]').forEach(function(inp) {
+        if (puzzleInput) return;
+        var ph = (inp.placeholder || '').toLowerCase();
+        if (ph.indexOf('answer') !== -1 || ph.indexOf('enter') !== -1) puzzleInput = inp;
+      });
+    }
+    // Find Solve button — try ID first, then text match
+    var solveBtn = document.getElementById('puzzle-solve');
+    if (!solveBtn) {
+      document.querySelectorAll('button').forEach(function(btn) {
+        if (!solveBtn && /^solve$/i.test(btn.textContent.trim()) && !btn.disabled) solveBtn = btn;
+      });
+    }
+    if (!puzzleInput || !solveBtn) return;
     // Fill input using native setter for React compatibility
     var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     nativeSetter.call(puzzleInput, String(answer));
@@ -936,19 +964,15 @@ function(options) {
     }
     if (codeInput && submitBtn) {
       var bestCode = foundCodes[0];
-      // Submit if input is empty, already has the same code, or has a stale code from a previous step
-      var inputStale = codeInput.value && allSubmittedCodes.indexOf(codeInput.value) !== -1;
-      if (!codeInput.value || codeInput.value === bestCode || inputStale) {
-        // Scroll input into view first — filler content may push it way below viewport
-        try { codeInput.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
+      // Always overwrite input — foundCodes is already filtered to exclude allSubmittedCodes
+      if (true) {
         // Set value using native setter to trigger React/framework change handlers
         var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
         nativeInputValueSetter.call(codeInput, bestCode);
         codeInput.dispatchEvent(new Event('input', { bubbles: true }));
         codeInput.dispatchEvent(new Event('change', { bubbles: true }));
-        // Delay click to let React process the input event and update state.
-        // React 18 batches state updates — they flush after the current task.
-        // setTimeout(0) creates a new task that runs after React's flush.
+        // Delay scroll+click to after React processes state AND after Phase 3 scrollTo(0,0).
+        // Phase 3 runs after pre_solve returns, doing scrollTo(0,0). Our setTimeout runs after that.
         var theSubmitBtn = submitBtn;
         setTimeout(function() {
           // Re-query submit button (React may have re-rendered)
