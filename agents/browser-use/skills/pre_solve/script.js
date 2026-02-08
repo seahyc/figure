@@ -122,7 +122,28 @@ function(options) {
     }
   }
 
-  // Pattern 5: (removed — drag_drop is now handled by React state extraction in Source 10)
+  // Pattern 5: Auto-solve drag_drop — dispatch drop events on each empty slot
+  // The drop handler doesn't check which piece was dropped, just fills the slot
+  (function() {
+    var slots = document.querySelectorAll('[data-slot]');
+    if (slots.length === 0) return;
+    var filledCount = 0;
+    slots.forEach(function(slot) {
+      if (slot.dataset.filled) { filledCount++; return; }
+      try {
+        var dt = new DataTransfer();
+        dt.setData('text/plain', 'piece-0');
+        var dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
+        slot.dispatchEvent(dropEvt);
+        filledCount++;
+      } catch(e) {
+        // Fallback without DataTransfer
+        slot.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }));
+        filledCount++;
+      }
+    });
+    if (filledCount > 0) actions.push('Drag-drop: filled ' + filledCount + '/' + slots.length + ' slots');
+  })();
 
   // Pattern 6: Auto-solve canvas/gesture challenges
   // Handles both: gesture (1 stroke + Complete button) and canvas (3+ strokes)
