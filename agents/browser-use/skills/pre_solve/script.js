@@ -104,38 +104,70 @@ function(options) {
 
   // Pattern 5: (removed — drag_drop is now handled by React state extraction in Source 10)
 
-  // Pattern 6: Auto-solve gesture challenges
-  // The challenge requires one mouse stroke on the canvas, then clicking "Complete".
-  // We simulate mousedown, mousemove, mouseup to draw, then click the button.
+  // Pattern 6: Auto-solve canvas/gesture challenges
+  // Handles both: gesture (1 stroke + Complete button) and canvas (3+ strokes)
+  // We simulate mousedown, mousemove, mouseup to draw strokes.
   (function() {
-    var canvas = document.querySelector('canvas.cursor-crosshair, canvas[class*="crosshair"]');
+    var canvas = document.querySelector('canvas.cursor-crosshair, canvas[class*="crosshair"], canvas');
     if (!canvas) return;
+    // Check for stroke counter (canvas challenge) or gesture-complete button
+    var bodyText = document.body ? document.body.innerText : '';
+    var strokeMatch = bodyText.match(/(\d+)\s*\/\s*(\d+)\s*strokes?/i);
     var gestureBtn = document.getElementById('gesture-complete');
-    // Only act if the button exists and is disabled (not already solved)
-    if (!gestureBtn || !gestureBtn.disabled) return;
+    // Skip if no gesture button and no stroke counter and canvas doesn't look like a challenge
+    if (!gestureBtn && !strokeMatch && !bodyText.match(/draw|stroke|canvas.*challenge/i)) return;
+
     var rect = canvas.getBoundingClientRect();
     var cx = rect.left + rect.width / 2;
     var cy = rect.top + rect.height / 2;
     var hw = rect.width * 0.3;
     var hh = rect.height * 0.3;
-    // Draw a simple square
-    var points = [
-      [cx - hw, cy - hh], [cx + hw, cy - hh],
-      [cx + hw, cy + hh], [cx - hw, cy + hh],
-      [cx - hw, cy - hh]
-    ];
-    canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: points[0][0], clientY: points[0][1] }));
-    for (var i = 1; i < points.length; i++) {
-      canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: points[i][0], clientY: points[i][1] }));
+
+    // Determine how many strokes to draw
+    var strokesNeeded = 1;
+    if (strokeMatch) {
+      var current = parseInt(strokeMatch[1]);
+      var total = parseInt(strokeMatch[2]);
+      strokesNeeded = total - current;
     }
-    canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: points[4][0], clientY: points[4][1] }));
-    // Now click the Complete button (it should be enabled after mouseup)
+    strokesNeeded = Math.max(strokesNeeded, 1);
+
+    // Draw multiple strokes using both MouseEvent and PointerEvent (React 17+ uses PointerEvents)
+    for (var s = 0; s < Math.min(strokesNeeded + 1, 6); s++) {
+      var startX = cx - hw + (s * 20);
+      var startY = cy - hh + (s * 15);
+      var endX = cx + hw - (s * 10);
+      var endY = cy + hh - (s * 10);
+      // Dispatch both pointer and mouse events (React may listen to either)
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: startX, clientY: startY, pointerId: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: startX, clientY: startY }));
+      for (var m = 1; m <= 5; m++) {
+        var mx = startX + (endX - startX) * m / 5;
+        var my = startY + (endY - startY) * m / 5;
+        canvas.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: mx, clientY: my, pointerId: 1 }));
+        canvas.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: mx, clientY: my }));
+      }
+      canvas.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: endX, clientY: endY, pointerId: 1 }));
+      canvas.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: endX, clientY: endY }));
+    }
+
+    // Try clicking Complete button (gesture challenge)
     gestureBtn = document.getElementById('gesture-complete');
     if (gestureBtn && !gestureBtn.disabled) {
       gestureBtn.click();
-      actions.push('Auto-solved gesture: drew square + clicked Complete');
+      actions.push('Auto-solved gesture: drew + clicked Complete');
     } else {
-      actions.push('Gesture: drew on canvas, button may need another click');
+      // Also try "Complete Challenge" button text
+      document.querySelectorAll('button').forEach(function(btn) {
+        var t = btn.textContent.trim();
+        if (/complete.*challenge/i.test(t) && !btn.disabled) {
+          btn.click();
+          actions.push('Auto-solved canvas: drew + clicked Complete Challenge');
+        }
+      });
+      if (strokesNeeded > 0) {
+        actions.push('Canvas: drew ' + Math.min(strokesNeeded + 1, 6) + ' strokes');
+      }
     }
   })();
 
@@ -287,6 +319,39 @@ function(options) {
         }
         actions.push('Hidden DOM click: clicked ' + (needed + 1) + ' times on cursor-pointer');
       }
+    }
+  })();
+
+  // Pattern 15: Auto-solve hover_reveal — dispatch hover events on "Hover here" elements
+  (function() {
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/hover.*reveal|hover.*code|hover.*here/i.test(bodyText)) return;
+    // Find the hover target element
+    var target = null;
+    document.querySelectorAll('div, span, p').forEach(function(el) {
+      var text = el.textContent.trim();
+      if (/hover here/i.test(text) && text.length < 50 && !target) {
+        target = el;
+      }
+    });
+    if (!target) {
+      // Try data-testid or class-based selectors
+      target = document.querySelector('[data-testid="hover-box"]') ||
+               document.querySelector('[class*="hover"]');
+    }
+    if (target) {
+      var rect = target.getBoundingClientRect();
+      var cx = rect.left + rect.width / 2;
+      var cy = rect.top + rect.height / 2;
+      // Dispatch full hover event sequence
+      target.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: cx, clientY: cy }));
+      target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, clientX: cx, clientY: cy }));
+      target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: cx, clientY: cy }));
+      // Also dispatch pointer events which React may use
+      target.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true, clientX: cx, clientY: cy }));
+      target.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, clientX: cx, clientY: cy }));
+      target.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: cx, clientY: cy }));
+      actions.push('Hover dispatch on "' + target.textContent.trim().substring(0, 30) + '"');
     }
   })();
 
