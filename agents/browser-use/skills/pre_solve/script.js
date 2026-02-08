@@ -191,27 +191,90 @@ function(options) {
     actions.push('Puzzle: computed ' + mathMatch[1] + ' + ' + mathMatch[2] + ' = ' + answer + ' and clicked Solve');
   })();
 
-  // Pattern 5: Auto-solve drag_drop — dispatch drop events on each empty slot
-  // The drop handler doesn't check which piece was dropped, just fills the slot
+  // Pattern 5: Auto-solve drag_drop challenge
+  // Strategy 1: Direct DOM events on [data-slot] elements (vanilla JS challenge server)
+  // Strategy 2: React __reactProps onDragStart/onDrop handlers (compiled React sites)
+  //   React's drop handler requires the "dragged item" state to be set first via onDragStart,
+  //   and React batches state updates, so we chain setTimeout(dragStart, wait, drop) per slot.
+  var __dragDropPending = false;
   (function() {
-    var slots = document.querySelectorAll('[data-slot]');
-    if (slots.length === 0) return;
-    var filledCount = 0;
-    slots.forEach(function(slot) {
-      if (slot.dataset.filled) { filledCount++; return; }
-      try {
-        var dt = new DataTransfer();
-        dt.setData('text/plain', 'piece-0');
-        var dropEvt = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });
-        slot.dispatchEvent(dropEvt);
-        filledCount++;
-      } catch(e) {
-        // Fallback without DataTransfer
-        slot.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }));
-        filledCount++;
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/drag.{0,10}drop|fill.*slots.*pieces/i.test(bodyText)) return;
+
+    // Strategy 1: data-slot attribute (vanilla JS)
+    var dataSlots = document.querySelectorAll('[data-slot]');
+    if (dataSlots.length > 0) {
+      var filledCount = 0;
+      dataSlots.forEach(function(slot) {
+        if (slot.dataset.filled) { filledCount++; return; }
+        try {
+          var dt = new DataTransfer();
+          dt.setData('text/plain', 'piece-0');
+          slot.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+          filledCount++;
+        } catch(e) {
+          slot.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true }));
+          filledCount++;
+        }
+      });
+      if (filledCount > 0) actions.push('Drag-drop: filled ' + filledCount + '/' + dataSlots.length + ' slots via data-slot');
+      return;
+    }
+
+    // Strategy 2: React props (compiled site — no data-slot attributes)
+    var pieces = document.querySelectorAll('[draggable="true"]');
+    var slots = [];
+    document.querySelectorAll('div').forEach(function(el) {
+      var cls = el.className || '';
+      if (typeof cls === 'string' && cls.includes('w-16') && cls.includes('h-16') && cls.includes('border-dashed')) {
+        slots.push(el);
       }
     });
-    if (filledCount > 0) actions.push('Drag-drop: filled ' + filledCount + '/' + slots.length + ' slots');
+    if (pieces.length === 0 || slots.length === 0) return;
+    var propsKey = Object.keys(pieces[0]).find(function(k) { return k.indexOf('__reactProps') === 0; });
+    if (!propsKey) return;
+
+    var numSlots = Math.min(slots.length, pieces.length, 6);
+    __dragDropPending = true;
+    // Schedule staggered dragStart→drop pairs so React state flushes between each
+    for (var i = 0; i < numSlots; i++) {
+      (function(idx) {
+        setTimeout(function() {
+          // Re-query pieces (React may re-render between iterations)
+          var curPieces = document.querySelectorAll('[draggable="true"]');
+          var piece = curPieces[idx];
+          if (!piece) return;
+          var pk = Object.keys(piece).find(function(k) { return k.indexOf('__reactProps') === 0; });
+          if (!pk || !piece[pk].onDragStart) return;
+          piece[pk].onDragStart({
+            dataTransfer: { effectAllowed: 'none', setData: function(){}, setDragImage: function(){} },
+            preventDefault: function(){}
+          });
+          // Drop after brief wait for React state flush
+          setTimeout(function() {
+            var curSlots = [];
+            document.querySelectorAll('div').forEach(function(el) {
+              var cls = el.className || '';
+              if (typeof cls === 'string' && cls.includes('w-16') && cls.includes('h-16') &&
+                  (cls.includes('border-dashed') || cls.includes('border-green'))) {
+                curSlots.push(el);
+              }
+            });
+            var slot = curSlots[idx];
+            if (!slot) return;
+            var sk = Object.keys(slot).find(function(k) { return k.indexOf('__reactProps') === 0; });
+            if (!sk || !slot[sk].onDrop) return;
+            slot[sk].onDrop({
+              preventDefault: function(){},
+              dataTransfer: { dropEffect: 'none', getData: function() { return ''; } }
+            });
+            // Mark complete after last slot
+            if (idx === numSlots - 1) __dragDropPending = false;
+          }, 50);
+        }, idx * 150);
+      })(i);
+    }
+    actions.push('Drag-drop: scheduled ' + numSlots + ' React prop drops');
   })();
 
   // Pattern 6: Auto-solve canvas/gesture challenges
@@ -944,7 +1007,10 @@ function(options) {
   if (__rotatingActive) {
     actions.push('Rotating active — skipping auto-submit');
   }
-  if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted && !window.__sequencePending && !__rotatingActive) {
+  if (__dragDropPending) {
+    actions.push('Drag-drop pending — skipping auto-submit');
+  }
+  if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted && !window.__sequencePending && !__rotatingActive && !__dragDropPending) {
     // Strategy 1: ID-based selectors (local challenge server)
     var codeInput = document.getElementById('code-input');
     var submitBtn = document.getElementById('submit-code');
