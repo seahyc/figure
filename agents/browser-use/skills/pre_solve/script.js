@@ -309,10 +309,14 @@ function(options) {
     // Dispatch all 4 action events
     var seqActions = [];
     if (clickBtn) { clickBtn.click(); seqActions.push('click'); }
-    if (hoverArea) {
+    if (hoverArea && !window.__seqHoverDispatched) {
+      // Only dispatch mouseenter ONCE — re-dispatching restarts the 800ms hover timer
       hoverArea.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
       hoverArea.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }));
+      window.__seqHoverDispatched = true;
       seqActions.push('hover-enter');
+    } else if (hoverArea && window.__seqHoverDispatched) {
+      seqActions.push('hover-waiting');  // Timer should have fired by now (Phase 2)
     }
     if (typeInput) {
       var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
