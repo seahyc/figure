@@ -65,7 +65,7 @@ function(options) {
 
   // A1: Click action buttons with general action verbs
   if (opts.clickActionButtons) {
-    var actionVerbs = /^(reveal|play|connect|register|extract|start|show|open|unlock|enable|activate|load|fetch|begin|launch|display|uncover|expose|decode|decrypt|generate|capture)\b/i;
+    var actionVerbs = /^(reveal|play|connect|register|extract|start|show|open|unlock|enable|activate|load|fetch|begin|launch|display|uncover|expose|decode|decrypt|generate)\b/i;
     document.querySelectorAll('button, [role="button"], a.btn, a.button, [class*="btn"]').forEach(function(btn) {
       // Skip submit code buttons and decoy navigation buttons
       var text = btn.textContent.trim();
@@ -152,7 +152,7 @@ function(options) {
     // Fallback: find Capture button and Captures count by text
     if (!captureBtn) {
       document.querySelectorAll('button').forEach(function(btn) {
-        if (!captureBtn && /^capture$/i.test(btn.textContent.trim()) && !btn.disabled) captureBtn = btn;
+        if (!captureBtn && /^capture\b/i.test(btn.textContent.trim()) && !btn.disabled) captureBtn = btn;
       });
     }
     if (!countEl) {
