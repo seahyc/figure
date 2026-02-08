@@ -161,11 +161,54 @@ function(options) {
   })();
 
   // Pattern 8: Auto-solve split_parts — click all parts, they reveal code fragments
+  // Challenge renders 3-4 absolutely positioned divs with text "Part N: XX"
+  // Multiple selector strategies since live site may compile classes differently
   (function() {
-    var parts = document.querySelectorAll('[class*="absolute"][class*="bg-yellow"], .absolute.bg-yellow-400');
+    // Only run if split parts challenge is active
+    var bodyText = document.body ? document.body.innerText : '';
+    if (!/split.?parts|scattered.*parts|find.*click.*parts/i.test(bodyText)) return;
+
+    var parts = [];
+    // Strategy 1: data-part attribute (source code uses this)
+    parts = document.querySelectorAll('[data-part]');
+    // Strategy 2: class-based selectors
+    if (parts.length < 2) {
+      parts = document.querySelectorAll('[class*="absolute"][class*="bg-yellow"], .absolute.bg-yellow-400');
+    }
+    // Strategy 3: Find elements containing "Part N:" text with cursor pointer
+    if (parts.length < 2) {
+      var candidates = [];
+      document.querySelectorAll('div, span').forEach(function(el) {
+        var text = el.textContent.trim();
+        if (/^Part\s+\d+\s*:/i.test(text) && text.length < 30) {
+          // Check if this is a leaf-ish element (the actual part, not a container)
+          if (el.children.length <= 1) candidates.push(el);
+        }
+      });
+      if (candidates.length >= 2) parts = candidates;
+    }
+    // Strategy 4: Scan computed styles for absolute-positioned cursor-pointer elements
+    // with yellow-ish background, z-index 100
+    if (parts.length < 2) {
+      var styled = [];
+      document.querySelectorAll('div').forEach(function(el) {
+        var s = window.getComputedStyle(el);
+        if (s.position === 'absolute' && s.cursor === 'pointer' && s.zIndex === '100') {
+          styled.push(el);
+        }
+      });
+      if (styled.length >= 2) parts = styled;
+    }
+
     if (parts.length >= 2) {
-      parts.forEach(function(p) { p.click(); });
-      actions.push('Clicked ' + parts.length + ' split parts');
+      var clickedTexts = [];
+      for (var pi = 0; pi < parts.length; pi++) {
+        if (!parts[pi].dataset || !parts[pi].dataset.clicked) {
+          parts[pi].click();
+          clickedTexts.push(parts[pi].textContent.trim().substring(0, 20));
+        }
+      }
+      actions.push('Clicked ' + parts.length + ' split parts: ' + clickedTexts.join(', '));
     }
   })();
 
@@ -406,6 +449,20 @@ function(options) {
                 for (var ci = 0; ci < codes.length; ci++) {
                   if (reactCodes.indexOf(codes[ci]) === -1) reactCodes.push(codes[ci]);
                 }
+                // Also check immediate children (some challenges store code in child components)
+                var childStack = [fiber.child];
+                var childVisited = 0;
+                while (childStack.length > 0 && childVisited < 50) {
+                  var cf = childStack.pop();
+                  if (!cf) continue;
+                  childVisited++;
+                  var childCodes = extractCodes(cf);
+                  for (var cci = 0; cci < childCodes.length; cci++) {
+                    if (reactCodes.indexOf(childCodes[cci]) === -1) reactCodes.push(childCodes[cci]);
+                  }
+                  if (cf.child) childStack.push(cf.child);
+                  if (cf.sibling) childStack.push(cf.sibling);
+                }
               }
               break; // Found the challenge component, stop walking
             }
@@ -468,10 +525,21 @@ function(options) {
   if (allSubmittedCodes.length > 0) {
     foundCodes = foundCodes.filter(function(c) { return allSubmittedCodes.indexOf(c) === -1; });
   }
-  // Skip if "Code accepted" is still visible (previous step's success message)
-  var alreadyAccepted = document.body && document.body.innerText &&
-    (document.body.innerText.indexOf('Code accepted') !== -1 ||
-     document.body.innerText.indexOf('Proceeding to step') !== -1);
+  // Skip if "Code accepted" is still visible AND the accepted code matches what we'd submit
+  // (Don't block submission of a genuinely NEW code just because "Code accepted" text lingers)
+  var alreadyAccepted = false;
+  if (document.body && document.body.innerText) {
+    var bodyInner = document.body.innerText;
+    if (bodyInner.indexOf('Code accepted') !== -1 || bodyInner.indexOf('Proceeding to step') !== -1) {
+      // Only block if we'd re-submit the same code that was just accepted
+      var acceptedCodeMatch = bodyInner.match(/(?:accepted|proceeding)[^A-Z]*([A-HJ-NP-Z2-9]{6})/i);
+      if (acceptedCodeMatch && foundCodes.length > 0 && foundCodes[0] === acceptedCodeMatch[1]) {
+        alreadyAccepted = true;
+      }
+      // Also block if ALL our found codes are in the submitted list
+      if (foundCodes.length === 0) alreadyAccepted = true;
+    }
+  }
   if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted) {
     // Strategy 1: ID-based selectors (local challenge server)
     var codeInput = document.getElementById('code-input');
