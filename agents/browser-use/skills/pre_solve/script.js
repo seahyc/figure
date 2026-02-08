@@ -988,14 +988,22 @@ function(options) {
   // Auto-submit: if we found a code, type it and click Submit Code
   // Filter out ALL previously submitted codes to prevent re-submitting stale codes
   var preFilterCount = foundCodes.length;
+  var staleCodes = [];
   if (allSubmittedCodes.length > 0) {
+    staleCodes = foundCodes.filter(function(c) { return allSubmittedCodes.indexOf(c) !== -1; });
     foundCodes = foundCodes.filter(function(c) { return allSubmittedCodes.indexOf(c) === -1; });
   }
   // Report codes AFTER filtering so the LLM only sees actionable (new) codes
   if (foundCodes.length > 0) {
     actions.push('Found new codes: ' + foundCodes.join(', '));
-  } else if (preFilterCount > 0) {
-    actions.push('Only found previously-submitted codes — current challenge not yet solved');
+  } else if (staleCodes.length > 0) {
+    actions.push('IGNORE codes on screen (' + staleCodes.join(', ') + ') — already submitted. Solve current challenge first');
+    // Clear stale code from input field to prevent LLM from trying to submit it
+    var staleInput = document.getElementById('code-input') ||
+      document.querySelector('input[placeholder*="code" i], input[placeholder*="character" i]');
+    if (staleInput && staleInput.value && staleCodes.indexOf(staleInput.value) !== -1) {
+      setInputValue(staleInput, '');
+    }
   }
   // Skip if "Code accepted" is still visible AND the accepted code matches what we'd submit
   // (Don't block submission of a genuinely NEW code just because "Code accepted" text lingers)
