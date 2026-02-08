@@ -790,7 +790,7 @@ async def pre_step_cleanup(agent):
                 if (window.__skills && window.__skills.pre_solve) return window.__skills.pre_solve();
                 return 'no_pre_solve';
             }""")
-            if second_result and "AUTO-SUBMITTED" in str(second_result):
+            if second_result and str(second_result) != 'no_pre_solve':
                 print(f"[pre_step_cleanup] Phase 2 result: {str(second_result)[:120]}")
 
         # Phase 3: DOM cleanup and metadata injection

@@ -936,8 +936,9 @@ function(options) {
     }
     if (codeInput && submitBtn) {
       var bestCode = foundCodes[0];
-      // Only submit if input is empty or has the same code (avoid double-submit)
-      if (!codeInput.value || codeInput.value === bestCode) {
+      // Submit if input is empty, already has the same code, or has a stale code from a previous step
+      var inputStale = codeInput.value && allSubmittedCodes.indexOf(codeInput.value) !== -1;
+      if (!codeInput.value || codeInput.value === bestCode || inputStale) {
         // Scroll input into view first — filler content may push it way below viewport
         try { codeInput.scrollIntoView({ behavior: 'instant', block: 'center' }); } catch(e) {}
         // Set value using native setter to trigger React/framework change handlers
