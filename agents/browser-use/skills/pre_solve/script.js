@@ -852,8 +852,13 @@ function(options) {
     var codeInput = document.getElementById('code-input');
     var submitBtn = document.getElementById('submit-code');
     // Strategy 2: Attribute/text-based selectors (live Netlify site)
+    // Exclude challenge-specific inputs (#base64-input, #seq-type-input) to avoid submitting to wrong field
     if (!codeInput) {
-      codeInput = document.querySelector('input[placeholder*="code" i], input[placeholder*="character" i]');
+      document.querySelectorAll('input[placeholder*="code" i], input[placeholder*="character" i]').forEach(function(inp) {
+        if (codeInput) return;
+        if (inp.id === 'base64-input' || inp.id === 'seq-type-input') return;
+        codeInput = inp;
+      });
     }
     if (!submitBtn) {
       document.querySelectorAll('button').forEach(function(btn) {
@@ -869,25 +874,26 @@ function(options) {
         nativeInputValueSetter.call(codeInput, bestCode);
         codeInput.dispatchEvent(new Event('input', { bubbles: true }));
         codeInput.dispatchEvent(new Event('change', { bubbles: true }));
-        // Re-query submit button (input event may have enabled it)
-        if (submitBtn.disabled) {
-          // Try re-finding the button after state change
+        // Delay click to let React process the input event and update state.
+        // React 18 batches state updates — they flush after the current task.
+        // setTimeout(0) creates a new task that runs after React's flush.
+        var theSubmitBtn = submitBtn;
+        setTimeout(function() {
+          // Re-query submit button (React may have re-rendered)
           var freshBtn = document.getElementById('submit-code');
           if (!freshBtn) {
             document.querySelectorAll('button').forEach(function(btn) {
               if (btn.textContent.trim() === 'Submit Code') freshBtn = btn;
             });
           }
-          if (freshBtn && !freshBtn.disabled) submitBtn = freshBtn;
-        }
-        if (!submitBtn.disabled) {
-          submitBtn.click();
-          if (!window.__preSolveSubmittedCodes) window.__preSolveSubmittedCodes = [];
-          window.__preSolveSubmittedCodes.push(bestCode);
-          actions.push('AUTO-SUBMITTED code: ' + bestCode);
-        } else {
-          actions.push('CODE READY but submit button still disabled: ' + bestCode);
-        }
+          if (freshBtn) theSubmitBtn = freshBtn;
+          if (!theSubmitBtn.disabled) {
+            theSubmitBtn.click();
+          }
+        }, 50);
+        if (!window.__preSolveSubmittedCodes) window.__preSolveSubmittedCodes = [];
+        window.__preSolveSubmittedCodes.push(bestCode);
+        actions.push('AUTO-SUBMITTED code: ' + bestCode);
       }
     }
   }
