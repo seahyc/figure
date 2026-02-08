@@ -309,14 +309,13 @@ function(options) {
     // Dispatch all 4 action events
     var seqActions = [];
     if (clickBtn) { clickBtn.click(); seqActions.push('click'); }
-    if (hoverArea && !window.__seqHoverDispatched) {
-      // Only dispatch mouseenter ONCE — re-dispatching restarts the 800ms hover timer
-      hoverArea.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false }));
-      hoverArea.dispatchEvent(new PointerEvent('pointerenter', { bubbles: false }));
-      window.__seqHoverDispatched = true;
-      seqActions.push('hover-enter');
-    } else if (hoverArea && window.__seqHoverDispatched) {
-      seqActions.push('hover-waiting');  // Timer should have fired by now (Phase 2)
+    if (hoverArea && !window.__seqHoverDone) {
+      // Store coordinates for real CDP mouse movement (dispatchEvent doesn't trigger mouseenter listener)
+      var rect = hoverArea.getBoundingClientRect();
+      window.__seqHoverCoords = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      seqActions.push('hover-coords(' + Math.round(window.__seqHoverCoords.x) + ',' + Math.round(window.__seqHoverCoords.y) + ')');
+    } else if (hoverArea && window.__seqHoverDone) {
+      seqActions.push('hover-done');
     }
     if (typeInput) {
       var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
@@ -532,14 +531,14 @@ function(options) {
     }
   })();
 
-  // Pattern 18: Auto-solve encoded_base64 — decode base64 text visible on page
+  // Pattern 18: Auto-solve encoded_base64 — fill input with dummy code, then click Reveal
+  // The challenge requires: (1) enter any 6-char code in #base64-input, (2) click Reveal button
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/base64|decode|encoded/i.test(bodyText)) return;
-    // Find elements with base64-encoded text (font-mono class or code elements)
+    // Decode base64 for reporting
     document.querySelectorAll('.font-mono, code, pre, [class*="code"]').forEach(function(el) {
       var text = el.textContent.trim();
-      // Base64 string pattern: 8+ characters of A-Za-z0-9+/=
       if (/^[A-Za-z0-9+/=]{8,}$/.test(text)) {
         try {
           var decoded = atob(text);
@@ -547,6 +546,27 @@ function(options) {
         } catch(e) {}
       }
     });
+    // Fill the input with a dummy 6-char code so Reveal button works
+    var b64Input = document.getElementById('base64-input');
+    if (!b64Input) b64Input = document.querySelector('input[placeholder*="code" i][maxlength="6"], input[placeholder*="char" i]');
+    if (b64Input && b64Input.value.length < 6) {
+      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      nativeSetter.call(b64Input, 'AAAAAA');
+      b64Input.dispatchEvent(new Event('input', { bubbles: true }));
+      b64Input.dispatchEvent(new Event('change', { bubbles: true }));
+      actions.push('Base64: filled input with dummy code');
+    }
+    // Click Reveal button
+    var revealBtn = document.getElementById('base64-reveal');
+    if (!revealBtn) {
+      document.querySelectorAll('button').forEach(function(btn) {
+        if (/^reveal$/i.test(btn.textContent.trim())) revealBtn = btn;
+      });
+    }
+    if (revealBtn && !revealBtn.disabled) {
+      revealBtn.click();
+      actions.push('Base64: clicked Reveal');
+    }
   })();
 
   // Pattern 12: Find codes and optionally auto-submit

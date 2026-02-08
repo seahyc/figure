@@ -766,11 +766,26 @@ async def pre_step_cleanup(agent):
         }""")
         print(f"[pre_step_cleanup] Phase 1 result: {str(first_result)[:120]}")
 
-        # Phase 2: If first pass didn't auto-submit, wait for delayed content and retry.
-        # This catches delayed_reveal (3s timer) and timed challenges without slowing
-        # down steps that pre_solve already handled.
+        # Phase 1.5: If sequence challenge hover coords detected, use real mouse movement
+        # (dispatchEvent(mouseenter) doesn't trigger native listeners in headless Chromium)
+        did_hover = False
         if first_result and "AUTO-SUBMITTED" not in str(first_result):
-            await asyncio.sleep(5)
+            hover_coords = await page.evaluate("() => window.__seqHoverCoords ? JSON.stringify(window.__seqHoverCoords) : null")
+            if hover_coords:
+                import json
+                coords = json.loads(hover_coords) if isinstance(hover_coords, str) else hover_coords
+                mouse = await page.mouse
+                await mouse.move(coords['x'], coords['y'])
+                await asyncio.sleep(1.5)  # 800ms hover timer + 700ms margin
+                await page.evaluate("() => { window.__seqHoverDone = true; delete window.__seqHoverCoords; }")
+                print(f"[pre_step_cleanup] Phase 1.5: moved mouse to hover area ({coords['x']:.0f}, {coords['y']:.0f})")
+                did_hover = True
+
+            # Phase 2: Wait for delayed content and retry.
+            # This catches delayed_reveal (3s timer) and timed challenges without slowing
+            # down steps that pre_solve already handled.
+            remaining_wait = 3.5 if did_hover else 5
+            await asyncio.sleep(remaining_wait)
             second_result = await page.evaluate("""() => {
                 if (window.__skills && window.__skills.pre_solve) return window.__skills.pre_solve();
                 return 'no_pre_solve';
