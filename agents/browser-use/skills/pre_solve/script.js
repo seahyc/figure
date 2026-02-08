@@ -17,11 +17,31 @@ function(options) {
   // Track all previously submitted codes to prevent re-submitting stale codes from previous steps
   // This array persists across pre_solve invocations via window global
   var allSubmittedCodes = window.__preSolveSubmittedCodes || [];
-  // Also detect codes visible as "accepted" on the page (catches manual submissions by LLM)
-  var acceptedMatch = document.body && document.body.innerText &&
-    document.body.innerText.match(/(?:AUTO-SUBMITTED|submitted|accepted)[^A-Z]*([A-HJ-NP-Z2-9]{6})/i);
-  if (acceptedMatch && allSubmittedCodes.indexOf(acceptedMatch[1]) === -1) {
-    allSubmittedCodes.push(acceptedMatch[1]);
+  // Detect codes visible as "accepted" or in error messages (catches manual submissions by LLM)
+  if (document.body && document.body.innerText) {
+    var pageInner = document.body.innerText;
+    // Match codes near "accepted", "submitted", "wrong code", "proceeding" messages
+    var submitPatterns = [
+      /(?:AUTO-SUBMITTED|submitted|accepted|proceeding)[^A-Z]*([A-HJ-NP-Z2-9]{6})/ig,
+      /wrong\s*code[^A-Z]*([A-HJ-NP-Z2-9]{6})/ig,
+      /([A-HJ-NP-Z2-9]{6})[^a-z]*(?:was|is)?\s*(?:wrong|rejected|invalid)/ig
+    ];
+    submitPatterns.forEach(function(pat) {
+      var m;
+      while ((m = pat.exec(pageInner)) !== null) {
+        if (allSubmittedCodes.indexOf(m[1]) === -1) {
+          allSubmittedCodes.push(m[1]);
+        }
+      }
+    });
+    // Also track whatever is currently in the code input field
+    var currentInput = document.getElementById('code-input') ||
+      document.querySelector('input[placeholder*="code" i], input[placeholder*="character" i]');
+    if (currentInput && currentInput.value && /^[A-HJ-NP-Z2-9]{6}$/.test(currentInput.value)) {
+      if (allSubmittedCodes.indexOf(currentInput.value) === -1) {
+        allSubmittedCodes.push(currentInput.value);
+      }
+    }
     window.__preSolveSubmittedCodes = allSubmittedCodes;
   }
 
@@ -246,9 +266,12 @@ function(options) {
 
   // Pattern 9: Auto-solve sequence challenge — 4 action types: click, hover, type, scroll
   // Phase 1 dispatches all 4 events; Phase 2 (5s later) clicks Complete button after hover timer fires
+  window.__sequencePending = false; // Clear flag each run — re-set below only if sequence challenge is active
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
-    if (!/sequence.*challenge|complete.*actions|action.*sequence/i.test(bodyText)) return;
+    // Must match sequence challenge but NOT keyboard sequence challenge
+    if (/keyboard.*sequence/i.test(bodyText)) return; // Skip keyboard_sequence challenges
+    if (!/sequence.*challenge|complete.*(?:all\s+)?\d+.*actions/i.test(bodyText)) return;
     // Find sequence action elements by ID first, then data-attributes, then text fallback
     var clickBtn = document.getElementById('seq-click-btn');
     var hoverArea = document.getElementById('seq-hover-area') || document.querySelector('[data-hover-area]');
