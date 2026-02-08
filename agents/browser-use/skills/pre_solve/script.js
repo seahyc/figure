@@ -249,35 +249,37 @@ function(options) {
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/sequence.*challenge|complete.*actions|action.*sequence/i.test(bodyText)) return;
-    // Find sequence action elements by ID or text
+    // Find sequence action elements by ID first, then data-attributes, then text fallback
     var clickBtn = document.getElementById('seq-click-btn');
-    var hoverArea = document.getElementById('seq-hover-area');
+    var hoverArea = document.getElementById('seq-hover-area') || document.querySelector('[data-hover-area]');
     var typeInput = document.getElementById('seq-type-input');
-    var scrollBox = document.getElementById('seq-scroll-box');
+    var scrollBox = document.getElementById('seq-scroll-box') || document.querySelector('[data-scroll-box]');
     var completeBtn = document.getElementById('seq-complete-btn');
-    // Fallback: find by text/attributes if IDs missing
-    if (!clickBtn) {
+    // Fallback: find by text/attributes if IDs and data-attrs missing
+    if (!clickBtn || !completeBtn) {
       document.querySelectorAll('button').forEach(function(btn) {
         var t = btn.textContent.trim().toLowerCase();
-        if (t === 'click me' || t === 'click' || /^click\s/i.test(t)) {
-          if (!clickBtn && !btn.disabled) clickBtn = btn;
+        if (!clickBtn && (t === 'click me' || t === 'click' || /^click\s/i.test(t)) && !btn.disabled) {
+          clickBtn = btn;
         }
-        if (/^complete$/i.test(t)) completeBtn = btn;
+        if (!completeBtn && /^complete/i.test(t)) completeBtn = btn;
       });
     }
     if (!hoverArea) {
       document.querySelectorAll('div, span').forEach(function(el) {
-        if (/hover here|hover.*area/i.test(el.textContent.trim()) && el.textContent.trim().length < 40) {
+        var text = el.textContent.trim();
+        if (/hover here|hover.*area/i.test(text) && text.length < 40 && el.children.length <= 1) {
           if (!hoverArea) hoverArea = el;
         }
       });
     }
-    if (!typeInput) typeInput = document.querySelector('input[type="text"]');
+    if (!typeInput) typeInput = document.querySelector('input[type="text"][placeholder*="ype" i], input[type="text"]');
     if (!scrollBox) {
       document.querySelectorAll('div').forEach(function(el) {
         var s = window.getComputedStyle(el);
-        if (s.overflow === 'auto' || s.overflow === 'scroll' || s.overflowY === 'auto' || s.overflowY === 'scroll') {
-          if (el.scrollHeight > el.clientHeight + 10) scrollBox = el;
+        if ((s.overflow === 'auto' || s.overflow === 'scroll' || s.overflowY === 'auto' || s.overflowY === 'scroll') &&
+            el.scrollHeight > el.clientHeight + 10) {
+          if (!scrollBox) scrollBox = el;
         }
       });
     }
@@ -304,6 +306,11 @@ function(options) {
     if (completeBtn && !completeBtn.disabled) {
       completeBtn.click();
       seqActions.push('complete');
+      window.__sequencePending = false; // Sequence completed, allow auto-submit
+    } else if (completeBtn && completeBtn.disabled) {
+      // Sequence challenge active but not all actions completed — don't auto-submit
+      // because the code exists in React state but challenge hasn't resolved yet
+      window.__sequencePending = true;
     }
     if (seqActions.length > 0) actions.push('Sequence: ' + seqActions.join(', '));
   })();
@@ -788,7 +795,12 @@ function(options) {
       if (foundCodes.length === 0) alreadyAccepted = true;
     }
   }
-  if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted) {
+  // Don't auto-submit if sequence challenge is detected but not completed (code exists
+  // in React state but challenge promise hasn't resolved yet — server will reject it)
+  if (window.__sequencePending) {
+    actions.push('Sequence pending — skipping auto-submit');
+  }
+  if (opts.autoSubmit && foundCodes.length >= 1 && !alreadyAccepted && !window.__sequencePending) {
     // Strategy 1: ID-based selectors (local challenge server)
     var codeInput = document.getElementById('code-input');
     var submitBtn = document.getElementById('submit-code');
