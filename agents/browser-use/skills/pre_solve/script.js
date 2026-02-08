@@ -10,6 +10,20 @@ function(options) {
 
   var actions = [];
 
+  // --- Constants ---
+  // Challenge code charset: uppercase letters (minus I, O) + digits (minus 0, 1)
+  var CODE_CHARSET = 'A-HJ-NP-Z2-9';
+  var CODE_PATTERN = new RegExp('\\b[' + CODE_CHARSET + ']{6}\\b');
+  var CODE_PATTERN_GLOBAL = new RegExp('[' + CODE_CHARSET + ']{6}', 'g');
+
+  // React-compatible native input setter (avoids React overriding .value)
+  var nativeInputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  function setInputValue(input, value) {
+    nativeInputSetter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
   // Clear old results div to prevent false positives from previous steps
   var oldResults = document.getElementById('__pre_solve_results');
   if (oldResults) oldResults.remove();
@@ -45,7 +59,11 @@ function(options) {
     window.__preSolveSubmittedCodes = allSubmittedCodes;
   }
 
-  // Pattern 1: Click action buttons with general action verbs
+  // -----------------------------------------------------------------------
+  // Section A: Generic interaction patterns (framework-agnostic)
+  // -----------------------------------------------------------------------
+
+  // A1: Click action buttons with general action verbs
   if (opts.clickActionButtons) {
     var actionVerbs = /^(reveal|play|connect|register|extract|start|show|open|unlock|enable|activate|load|fetch|begin|launch|display|uncover|expose|decode|decrypt|generate|capture)\b/i;
     document.querySelectorAll('button, [role="button"], a.btn, a.button, [class*="btn"]').forEach(function(btn) {
@@ -67,7 +85,7 @@ function(options) {
     });
   }
 
-  // Pattern 2: Click repeatedly-actionable buttons near progress indicators (N/M pattern)
+  // A2: Click repeatedly-actionable buttons near progress indicators (N/M pattern)
   // Only for simple single-action counting (e.g. "Capture 0/10"), NOT multi-action sequences.
   if (opts.clickProgressButtons) {
     document.querySelectorAll('button, [role="button"]').forEach(function(btn) {
@@ -94,7 +112,7 @@ function(options) {
     });
   }
 
-  // Pattern 3: Click sequential navigation elements (tabs, numbered buttons)
+  // A3: Click sequential navigation elements (tabs, numbered buttons)
   if (opts.clickSequentialNav) {
     var tabPattern = /^(tab|section|part|step|page|panel)\s*\d+$/i;
     var numberedBtns = [];
@@ -112,7 +130,7 @@ function(options) {
     }
   }
 
-  // Pattern 4: Wait for visible countdowns (just report, don't block)
+  // A4: Detect visible countdowns (just report, don't block)
   if (opts.waitForCountdowns) {
     var countdownPattern = /(\d+)\s*(seconds?|s)\s*(remaining|left|until|to go)/i;
     var timerPattern = /\d{1,2}:\d{2}/;
@@ -122,9 +140,11 @@ function(options) {
     }
   }
 
-  // Pattern 5a: Auto-solve rotating code challenge — click Capture button 3 times
-  // The challenge shows random 6-char codes that change every 150ms. After 3 Capture clicks, the real code appears.
-  // Pattern 1 only clicks it once; we need all 3 clicks to reveal the code.
+  // -----------------------------------------------------------------------
+  // Section B: Challenge-specific interaction solvers
+  // -----------------------------------------------------------------------
+
+  // B1: Rotating code — click Capture button 3 times to reveal the real code
   var __rotatingActive = false;
   (function() {
     var captureBtn = document.getElementById('rotating-capture');
@@ -156,8 +176,7 @@ function(options) {
     actions.push('Rotating: clicked Capture 3 times');
   })();
 
-  // Pattern 5b: Auto-solve puzzle_solve — parse math, compute answer, fill input, click Solve
-  // The puzzle shows "A + B = ?" where A = 10 + (step % 20), B = 5 + (step % 15)
+  // B2: Math puzzle — parse expression, compute answer, fill input, click Solve
   (function() {
     // Parse the math expression first to confirm this is a puzzle challenge
     var bodyText = document.body ? document.body.innerText : '';
@@ -181,19 +200,14 @@ function(options) {
       });
     }
     if (!puzzleInput || !solveBtn) return;
-    // Fill input using native setter for React compatibility
-    var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    nativeSetter.call(puzzleInput, String(answer));
-    puzzleInput.dispatchEvent(new Event('input', { bubbles: true }));
-    puzzleInput.dispatchEvent(new Event('change', { bubbles: true }));
-    // Click Solve button
+    setInputValue(puzzleInput, String(answer));
     solveBtn.click();
     actions.push('Puzzle: computed ' + mathMatch[1] + ' + ' + mathMatch[2] + ' = ' + answer + ' and clicked Solve');
   })();
 
-  // Pattern 5: Auto-solve drag_drop challenge
-  // Strategy 1: Direct DOM events on [data-slot] elements (vanilla JS challenge server)
-  // Strategy 2: React __reactProps onDragStart/onDrop handlers (compiled React sites)
+  // B3: Drag-and-drop — fill empty slots with available pieces
+  // Strategy 1: Direct DOM events on [data-slot] elements (vanilla JS)
+  // Strategy 2: React __reactProps onDragStart/onDrop handlers (compiled React)
   //   React's drop handler requires the "dragged item" state to be set first via onDragStart,
   //   and React batches state updates, so we chain setTimeout(dragStart, wait, drop) per slot.
   var __dragDropPending = false;
@@ -277,9 +291,7 @@ function(options) {
     actions.push('Drag-drop: scheduled ' + numSlots + ' React prop drops');
   })();
 
-  // Pattern 6: Auto-solve canvas/gesture challenges
-  // Handles both: gesture (1 stroke + Complete button) and canvas (3+ strokes)
-  // We simulate mousedown, mousemove, mouseup to draw strokes.
+  // B4: Canvas/gesture — simulate mouse strokes to draw on canvas
   (function() {
     var canvas = document.querySelector('canvas.cursor-crosshair, canvas[class*="crosshair"], canvas');
     if (!canvas) return;
@@ -344,7 +356,7 @@ function(options) {
     }
   })();
 
-  // Pattern 7: Auto-solve hidden_dom — code in data attributes, aria-labels, meta tags
+  // B5: Hidden DOM — code in data attributes, aria-labels, meta tags
   (function() {
     var el = document.querySelector('[data-code]');
     if (el && el.dataset.code) {
@@ -365,9 +377,7 @@ function(options) {
     });
   })();
 
-  // Pattern 8: Auto-solve split_parts — click all parts, they reveal code fragments
-  // Challenge renders 3-4 absolutely positioned divs with text "Part N: XX"
-  // Multiple selector strategies since live site may compile classes differently
+  // B6: Split parts — click scattered UI fragments to assemble the code
   (function() {
     // Only run if split parts challenge is active
     var bodyText = document.body ? document.body.innerText : '';
@@ -417,8 +427,7 @@ function(options) {
     }
   })();
 
-  // Pattern 9: Auto-solve sequence challenge — 4 action types: click, hover, type, scroll
-  // Phase 1 dispatches all 4 events; Phase 2 (5s later) clicks Complete button after hover timer fires
+  // B7: Multi-action sequence — perform click, hover, type, scroll in sequence
   window.__sequencePending = false; // Clear flag each run — re-set below only if sequence challenge is active
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
@@ -473,9 +482,7 @@ function(options) {
       seqActions.push('hover-done');
     }
     if (typeInput) {
-      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      nativeSetter.call(typeInput, 'X');
-      typeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      setInputValue(typeInput, 'X');
       seqActions.push('type');
     }
     if (scrollBox) {
@@ -496,8 +503,7 @@ function(options) {
     if (seqActions.length > 0) actions.push('Sequence: ' + seqActions.join(', '));
   })();
 
-  // Pattern 10: Auto-solve service_worker — click Register then Retrieve buttons
-  // First pass clicks Register, second pass (after 3.5s delay) clicks Retrieve
+  // B8: Service worker — click Register then Retrieve buttons
   (function() {
     var registerBtn = null;
     var retrieveBtn = null;
@@ -516,7 +522,7 @@ function(options) {
     }
   })();
 
-  // Pattern 11: Auto-solve websocket — click Connect button
+  // B9: WebSocket — click Connect button
   (function() {
     document.querySelectorAll('button').forEach(function(btn) {
       var text = btn.textContent.trim();
@@ -527,8 +533,7 @@ function(options) {
     });
   })();
 
-  // Pattern 13: Auto-solve scroll_reveal — scroll page to trigger scroll-based reveals
-  // Only trigger when the challenge description explicitly mentions scrolling to reveal
+  // B10: Scroll reveal — scroll page to trigger scroll-position-based reveals
   (function() {
     // Look for scroll instructions in the challenge area, not entire body
     var challengeArea = document.querySelector('.max-w-6xl') || document.querySelector('main') || document.body;
@@ -547,7 +552,7 @@ function(options) {
     }
   })();
 
-  // Pattern 14: Auto-solve hidden_dom click variant — "click here N more times"
+  // B11: Click-to-reveal — "click here N more times" pattern
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     var clickMatch = bodyText.match(/click here (\d+) more times?/i);
@@ -572,7 +577,7 @@ function(options) {
     }
   })();
 
-  // Pattern 15: Auto-solve hover_reveal — dispatch hover events on "Hover here" elements
+  // B12: Hover reveal — dispatch hover events on target elements
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/hover.*reveal|hover.*code|hover.*here/i.test(bodyText)) return;
@@ -605,7 +610,7 @@ function(options) {
     }
   })();
 
-  // Pattern 16: Auto-solve shadow_dom — traverse nested shadowRoot elements and click
+  // B13: Shadow DOM — traverse nested shadowRoot elements and click
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/shadow.*dom|shadow.*level|navigate.*shadow/i.test(bodyText)) return;
@@ -648,7 +653,7 @@ function(options) {
     if (clickedLevels > 0) actions.push('Shadow DOM: clicked ' + clickedLevels + ' levels');
   })();
 
-  // Pattern 17: Auto-solve mutation challenge — click trigger button N times + reveal
+  // B14: DOM mutation — click trigger button N times, then click Reveal
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/mutation|trigger.*mutation|mutations?\s*triggered/i.test(bodyText)) return;
@@ -686,8 +691,7 @@ function(options) {
     }
   })();
 
-  // Pattern 18: Auto-solve encoded_base64 — fill input with dummy code, then click Reveal
-  // The challenge requires: (1) enter any 6-char code in #base64-input, (2) click Reveal button
+  // B15: Base64/encoded — fill input with dummy value, then click Reveal
   (function() {
     var bodyText = document.body ? document.body.innerText : '';
     if (!/base64|decode|encoded/i.test(bodyText)) return;
@@ -705,10 +709,7 @@ function(options) {
     var b64Input = document.getElementById('base64-input');
     if (!b64Input) b64Input = document.querySelector('input[placeholder*="code" i][maxlength="6"], input[placeholder*="char" i]');
     if (b64Input && b64Input.value.length < 6) {
-      var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-      nativeSetter.call(b64Input, '000000');  // Use zeros — not in challenge charset, won't be found by code extraction
-      b64Input.dispatchEvent(new Event('input', { bubbles: true }));
-      b64Input.dispatchEvent(new Event('change', { bubbles: true }));
+      setInputValue(b64Input, '000000');  // Zeros: not in challenge charset, won't be found by code extraction
       actions.push('Base64: filled input with dummy code');
     }
     // Click Reveal button
@@ -724,9 +725,10 @@ function(options) {
     }
   })();
 
-  // Pattern 12: Find codes and optionally auto-submit
-  // Challenge charset: ABCDEFGHJKLMNPQRSTUVWXYZ23456789 (no I, O, 0, 1)
-  var codePattern = /\b[A-HJ-NP-Z2-9]{6}\b/;
+  // -----------------------------------------------------------------------
+  // Section C: Code extraction and auto-submit
+  // -----------------------------------------------------------------------
+  var codePattern = CODE_PATTERN;
   var foundCodes = [];
 
   if (opts.reportResults || opts.autoSubmit) {
@@ -1031,13 +1033,10 @@ function(options) {
     if (codeInput && submitBtn) {
       var bestCode = foundCodes[0];
       // Always overwrite input — foundCodes is already filtered to exclude allSubmittedCodes
-      if (true) {
-        // Set value using native setter to trigger React/framework change handlers
-        var nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        nativeInputValueSetter.call(codeInput, bestCode);
-        codeInput.dispatchEvent(new Event('input', { bubbles: true }));
-        codeInput.dispatchEvent(new Event('change', { bubbles: true }));
-        // Delay scroll+click to after React processes state AND after Phase 3 scrollTo(0,0).
+      // Always overwrite: foundCodes is filtered to exclude already-submitted codes
+      setInputValue(codeInput, bestCode);
+      {
+        // Delay click so React processes the input value change.
         // Phase 3 runs after pre_solve returns, doing scrollTo(0,0). Our setTimeout runs after that.
         var theSubmitBtn = submitBtn;
         setTimeout(function() {

@@ -1,8 +1,8 @@
 """
-Figure Agent v2 - Generalizable Browser Automation
+Figure Agent v2 - Browser Automation Agent
 
 Uses browser-use framework with LLM for visual understanding.
-No hardcoded challenge-specific logic - purely generalizable.
+General-purpose architecture with pluggable skills for domain-specific tasks.
 """
 
 import os
@@ -698,32 +698,13 @@ def build_tools() -> Tools:
 
 SYSTEM_PROMPT = """You are an efficient web automation agent. Follow the task instructions carefully.
 
-CRITICAL — PRE-SOLVE AUTO-SUBMITS:
-pre_solve runs AUTOMATICALLY before you see the page. It clicks action buttons, solves
-drag_drop/gesture, finds codes, and AUTO-SUBMITS them. Check #__pre_solve_results first.
-If it says "AUTO-SUBMITTED", the step is ALREADY DONE — just wait for the next page.
-
 EFFICIENCY RULES:
 - Think in 1-2 sentences max. Act immediately.
-- If pre_solve already submitted, do NOTHING — page will advance.
+- Always check #__pre_solve_results first — the pre_solve skill runs AUTOMATICALLY before
+  each step and may have already performed actions or auto-submitted.
 - Combine actions: input + click in one step.
 - If stuck after 2 attempts, use search_dom or try a completely different approach.
-
-WHEN PRE-SOLVE DIDN'T HANDLE IT:
-1. Check if code is visible (font-mono, font-bold, highlighted text) → input + submit
-2. Scroll challenge → evaluate("window.__skills.scroll_to({position:'bottom'})")
-3. Hover challenge → hover(index=N), then check for revealed code
-4. Shadow DOM → evaluate("window.__skills.shadow_dom()")
-5. Canvas/drawing → draw(index=N, strokes=3)
-6. Keyboard sequence → send_keys("ArrowUp ArrowDown ArrowLeft ArrowRight")
-7. Math/calculation → evaluate("window.__skills.compute({math: 'EXPRESSION'})")
-8. Base64/encoded → evaluate("window.__skills.compute({decode: 'BASE64_STRING'})")
-9. Reversed string → evaluate("window.__skills.compute({reverse: 'STRING'})")
-10. Hidden DOM → evaluate("window.__skills.search_dom({text:'[A-Z0-9]{6}'})")
-
-NEVER click: "Next", "Continue", "Proceed", "Go Forward", "Click Me", floating elements.
-ONLY "Submit Code" button advances to the next step. Find it by its text content.
-Input field: look for placeholder "Enter 6-character code" if #code-input doesn't exist.
+- Never click decoy navigation buttons (Next, Continue, Go Forward, Click Me).
 """
 
 
