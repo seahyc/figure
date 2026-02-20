@@ -1,7 +1,8 @@
 function(options) {
   var opts = Object.assign({
     keywords: ['dismiss', 'close', 'decline', 'reject', 'accept',
-               'no thanks', 'not now', 'maybe later', 'got it', 'ok'],
+               'no thanks', 'not now', 'maybe later', 'got it', 'ok',
+               'acknowledge', 'i understand', 'understood', 'confirm'],
     selectors: ['.close', '.close-btn', '.modal-close', '[class*="close-"]'],
     hideOverlays: true
   }, options || {});
@@ -34,7 +35,31 @@ function(options) {
     });
   });
 
-  // Phase 4: Hide remaining fixed/absolute overlays (with challenge element exclusions)
+  // Phase 4: Dismiss full-screen blocking overlays (click their buttons first, then hide)
+  // These overlays cover the entire viewport and block all interaction until dismissed.
+  // Common pattern: div.fixed with high z-index, semi-transparent bg, "acknowledge" text.
+  if (opts.hideOverlays) {
+    document.querySelectorAll('div').forEach(function(el) {
+      var style = getComputedStyle(el);
+      var z = parseFloat(style.zIndex) || 0;
+      // Full-screen overlay: fixed position, high z-index, covers most of viewport
+      if (style.position === 'fixed' && z > 500 && el.offsetWidth > 0 &&
+          el.offsetWidth >= window.innerWidth * 0.8 && el.offsetHeight >= window.innerHeight * 0.5) {
+        // Click all buttons inside (dismiss/close/acknowledge) except "Submit Code"
+        el.querySelectorAll('button').forEach(function(btn) {
+          var t = btn.textContent.trim().toLowerCase();
+          if (t !== 'submit code' && !btn.disabled) {
+            btn.click();
+            dismissed++;
+          }
+        });
+        el.style.display = 'none';
+        dismissed++;
+      }
+    });
+  }
+
+  // Phase 5: Hide remaining fixed/absolute overlays (with challenge element exclusions)
   if (opts.hideOverlays) {
     // Data attributes that indicate challenge-related elements
     var challengeAttrs = ['data-part', 'data-piece', 'data-tab', 'data-slot',
@@ -68,7 +93,7 @@ function(options) {
     });
   }
 
-  // Phase 5: Handle blocking radio modals (high z-index modal with radio options)
+  // Phase 6: Handle blocking radio modals (high z-index modal with radio options)
   var modalSelectors = ['.blocking-modal-content', '.modal-content', '[class*="blocking-modal"]',
                         '[class*="modal"][class*="block"]'];
   var modal = null;

@@ -1,13 +1,13 @@
 ---
-name: pre_solve
+name: page_assist
 type: script
 description: >
-  Automated pattern handler that clicks action buttons, handles progress
-  sequences, finds codes, and auto-submits them. Runs before LLM sees the
-  page to reduce round-trips. Works on both local server and live Netlify site.
+  Webpage skill that handles common interaction patterns: clicks action buttons,
+  manages progress sequences, extracts codes, and submits them. Runs before the
+  LLM sees the page to reduce round-trips. Generalizable to arbitrary web tasks.
 ---
 
-# Pre-Solve
+# Page Assist
 
 Recognizes common web interaction patterns and attempts to progress them
 automatically before the LLM processes the page. This reduces the number
@@ -18,13 +18,13 @@ of LLM round-trips needed per step.
 2. Clicks progress buttons repeatedly when (N/M) progress indicators are visible
 3. Clicks sequential navigation elements (Tab 1, Tab 2, etc.)
 4. Detects countdowns/timers on the page
-5. Auto-solves drag_drop challenges (fires drop events on empty slots)
-6. Auto-solves gesture challenges (draws a stroke on canvas + clicks Complete)
-7. Auto-solves hidden_dom click variant (clicks cursor-pointer N times)
-8. Auto-scrolls for scroll_reveal challenges
+5. Handles drag-and-drop challenges (fires drop events on empty slots)
+6. Handles gesture challenges (draws a stroke on canvas + clicks Complete)
+7. Handles hidden DOM click patterns (clicks cursor-pointer N times)
+8. Handles scroll-reveal challenges
 9. Finds codes from: data attrs, meta tags, aria-labels, hidden elements,
    HTML comments, title attrs, CSS pseudo-elements, styled text
-10. **Auto-submits**: types found code and clicks Submit Code
+10. **Submits codes**: types found code and clicks Submit Code
     - Supports both ID-based (#code-input/#submit-code) and text-based selectors
     - Handles disabled submit button (React state update enables it)
 
@@ -42,16 +42,16 @@ of LLM round-trips needed per step.
 - `clickSequentialNav` (boolean): Click numbered tabs/sections. Default: true
 - `waitForCountdowns` (boolean): Detect timers. Default: true
 - `reportResults` (boolean): Inject results div into DOM. Default: true
-- `autoSubmit` (boolean): Auto-submit found codes. Default: true
+- `autoSubmit` (boolean): Submit found codes. Default: true
 
 ## Examples
 ```js
-// Run full pre-solve with all patterns + auto-submit
-window.__skills.pre_solve()
+// Run full page assist with all patterns + code submission
+window.__skills.page_assist()
 
-// Only click action buttons, no auto-submit
-window.__skills.pre_solve({autoSubmit: false, clickProgressButtons: false})
+// Only click action buttons, no submission
+window.__skills.page_assist({autoSubmit: false, clickProgressButtons: false})
 
 // Disable DOM injection (for manual inspection)
-window.__skills.pre_solve({reportResults: false})
+window.__skills.page_assist({reportResults: false})
 ```

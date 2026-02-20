@@ -114,6 +114,48 @@ function(options) {
     }
   }
 
+  // Phase 2.5: Exclude known decoy buttons that waste LLM attention.
+  // These buttons appear on the challenge site but NEVER advance progress.
+  // Only "Submit Code" advances steps. Never exclude submit-related buttons.
+  var decoyTexts = ['next', 'continue', 'proceed', 'go forward', 'next step', 'next page', 'click me', 'click here', 'advance', 'move on', 'keep going', 'browse forward', 'continue journey', 'proceed forward', 'next section', 'continue reading'];
+  var allButtons = document.querySelectorAll('button, [role="button"]');
+  var decoyCount = 0;
+  for (var d = 0; d < allButtons.length; d++) {
+    var btn = allButtons[d];
+    if (btn.getAttribute(EXCLUDE_ATTR) === 'true') continue;
+    var btnText = btn.textContent.trim().toLowerCase();
+    // Never exclude submit-related buttons
+    if (btnText.indexOf('submit') !== -1) continue;
+    // Never exclude buttons inside forms
+    if (btn.closest('form')) continue;
+    // Check if button text matches a known decoy pattern
+    if (decoyTexts.indexOf(btnText) !== -1) {
+      markExclude(btn);
+      decoyCount++;
+    }
+  }
+
+  // Phase 2.75: Exclude structural noise (nav, footer, banners) outside challenge area.
+  // These add DOM bulk but never contain challenge content.
+  var noiseSelectors = [
+    'nav', 'footer',
+    '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
+    'header:not(:has(form)):not(:has(input))'
+  ];
+  var noiseCount = 0;
+  noiseSelectors.forEach(function(sel) {
+    try {
+      document.querySelectorAll(sel).forEach(function(el) {
+        if (shouldKeep(el)) return;
+        if (el.getAttribute(EXCLUDE_ATTR) === 'true') return;
+        // Don't exclude if it contains challenge-relevant content
+        if (el.querySelector && el.querySelector('input, [data-code], canvas, [draggable]')) return;
+        markExclude(el);
+        noiseCount++;
+      });
+    } catch(e) { /* :has() not supported in older browsers */ }
+  });
+
   // Phase 3 (aggressive): Exclude off-screen non-interactive blocks
   if (opts.aggressive) {
     var viewportBottom = window.innerHeight + window.scrollY + 500;
@@ -134,5 +176,5 @@ function(options) {
 
   var total = document.querySelectorAll('*').length;
   var excludedTotal = document.querySelectorAll('[' + EXCLUDE_ATTR + '="true"]').length;
-  return 'Cleaned DOM: excluded ' + excluded + ' new elements (total excluded: ' + excludedTotal + ', total DOM: ' + total + ', visible to agent: ~' + (total - excludedTotal) + ')';
+  return 'Cleaned DOM: excluded ' + excluded + ' new (' + decoyCount + ' decoy buttons, ' + noiseCount + ' structural noise), total excluded: ' + excludedTotal + ', total DOM: ' + total + ', visible: ~' + (total - excludedTotal);
 }

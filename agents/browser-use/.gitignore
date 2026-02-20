@@ -31,7 +31,12 @@ Thumbs.db
 
 # Test/debug output
 /tmp/
+.tmp/
 *.log
+browser-data/
+downloads/
+logs/
+tmp/
 .pytest_cache/
 .coverage
 htmlcov/

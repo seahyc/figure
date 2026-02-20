@@ -1,6 +1,9 @@
 # Run outputs (contains screenshots, logs, LLM traces)
 runs/
 
+# Agent run logs
+agents/browser-use/logs/
+
 # Python
 __pycache__/
 *.py[oc]

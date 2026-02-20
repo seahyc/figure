@@ -1,20 +1,21 @@
 Complete all 30 steps of the browser challenge.
 
 PATTERN FOR EACH STEP:
-1. Check #__pre_solve_results first — it may have already found the code and submitted it
-2. Look for the 6-character alphanumeric code (highlighted, bold, or monospace text)
-3. If code is visible, enter it in the input field and click "Submit Code" immediately
-4. If code is NOT visible, interact with the page to reveal it:
-   - Click buttons, hover elements, scroll the page
-   - Use evaluate() for canvas drawing, keyboard input, or DOM searches
-   - If stuck, try: evaluate("window.__skills.search_dom({text:'[A-Za-z0-9]{6}', regex:true})")
-5. After getting the code, enter it and click "Submit Code"
-6. Wait for the page to advance, then repeat
+1. Check #__page_assist_results first — it may have already found the code and submitted it
+   - "AUTO-SUBMITTED" or "Waiting for step transition" → wait(1), done
+   - "Found new codes: X" → Type X in code input, click Submit Code
+   - "Sequence pending" → Complete the sequence actions (type text, hover, scroll)
+2. If no code found, interact with the page to reveal it:
+   - Click challenge-specific buttons (Reveal, Play, Complete, Show)
+   - Sequence: type text in input, hover area, scroll box
+   - After interacting: evaluate("window.__skills.page_assist()")
+3. If stuck, try: evaluate("window.__skills.search_dom({text:'[A-HJ-NP-Z2-9]{6}', regex:true})")
 
 KEY RULES:
-- NEVER click decoy buttons: "Next Page", "Go Forward", "Continue", "Next Step", "Click Me", etc.
+- Popups are auto-dismissed — do NOT call dismiss_popups() manually
+- NEVER click decoy buttons: "Next Page", "Go Forward", "Continue", "Next Step", "Click Me"
 - ONLY click "Submit Code" button to advance
-- Use compute skill for ALL math — never do mental arithmetic on multi-digit numbers
-- If pre_solve already submitted the code, just wait for the next step
+- If page_assist already submitted the code, just wait for the next step
+- NEVER navigate to any URL — this is an SPA and navigation destroys all progress
 
 NEVER call done() until all 30 steps are complete.

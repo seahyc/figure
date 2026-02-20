@@ -9,15 +9,19 @@ import os
 import re
 import json
 import time
+import shutil
 import asyncio
-from dataclasses import dataclass
+import importlib.util
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
 from dotenv import load_dotenv
 from browser_use import Agent, Browser
-from browser_use.agent.views import ActionResult
+from browser_use.agent.views import ActionResult, AgentOutput
 from browser_use.tools.service import Tools
 from browser_use.tools.views import DoneAction
+from browser_use.tools.registry.views import ActionModel as _ActionModelBase
 from browser_use.llm.openai.chat import ChatOpenAI
 from browser_use.llm.google import ChatGoogle
 from browser_use.llm.anthropic.chat import ChatAnthropic
@@ -26,16 +30,55 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 # ---------------------------------------------------------------------------
+# Redirect all temp files (Chromium, Playwright, tempfile) into project dir
+# ---------------------------------------------------------------------------
+_PROJECT_TMP = Path(__file__).parent / "tmp"
+_PROJECT_TMP.mkdir(exist_ok=True)
+os.environ["TMPDIR"] = str(_PROJECT_TMP)
+
+# ---------------------------------------------------------------------------
 # Run logging: comprehensive logging to runs/ directory
 # ---------------------------------------------------------------------------
 
 RUNS_DIR = Path(__file__).parent.parent.parent / "runs"
+MAX_RUNS_DEFAULT = 20
+MAX_SCREENSHOT_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB
+
+
+def cleanup_old_runs(max_runs: int):
+    """FIFO cleanup: remove oldest run dirs beyond limit, then cap screenshot size."""
+    if max_runs <= 0 or not RUNS_DIR.exists():
+        return
+    dirs = sorted([d for d in RUNS_DIR.iterdir() if d.is_dir()], key=lambda d: d.name)
+    while len(dirs) > max_runs:
+        oldest = dirs.pop(0)
+        print(f"[cleanup] Removing old run: {oldest.name}")
+        shutil.rmtree(oldest, ignore_errors=True)
+    # Cap total screenshot size across remaining runs
+    total = 0
+    for d in dirs:
+        ss_dir = d / "screenshots"
+        if ss_dir.exists():
+            total += sum(f.stat().st_size for f in ss_dir.iterdir() if f.is_file())
+    if total > MAX_SCREENSHOT_BYTES:
+        for d in dirs:
+            if total <= MAX_SCREENSHOT_BYTES:
+                break
+            ss_dir = d / "screenshots"
+            if ss_dir.exists():
+                dir_size = sum(f.stat().st_size for f in ss_dir.iterdir() if f.is_file())
+                if dir_size > 0:
+                    print(f"[cleanup] Removing screenshots from {d.name} ({dir_size // 1024}KB)")
+                    shutil.rmtree(ss_dir, ignore_errors=True)
+                    total -= dir_size
 
 
 class RunLogger:
     """Comprehensive run logging for screenshots, LLM I/O, and DOM events."""
 
-    def __init__(self, agent_name: str = "browser-use", url: str = "", goal: str = ""):
+    def __init__(self, agent_name: str = "browser-use", url: str = "", goal: str = "",
+                 max_runs: int = MAX_RUNS_DEFAULT):
+        cleanup_old_runs(max_runs)
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.run_id = f"{ts}-{agent_name}"
         self.run_dir = RUNS_DIR / self.run_id
@@ -69,7 +112,6 @@ class RunLogger:
             path = self.run_dir / "screenshots" / fname
             png = await page.screenshot()
             if isinstance(png, str):
-                # base64 encoded string
                 path.write_bytes(base64.b64decode(png))
             elif isinstance(png, bytes):
                 path.write_bytes(png)
@@ -103,7 +145,8 @@ class RunLogger:
         data = {"step": step_num, "timestamp": datetime.now().isoformat(), "events": events}
         path.write_text(json.dumps(data, indent=2))
 
-    def save_summary(self, history, wall_time: float, model_key: str):
+    def save_summary(self, history, wall_time: float, model_key: str,
+                     step_timings: list[tuple[int, str, float]] | None = None):
         """Generate summary.md after run completes."""
         lines = [
             f"# Run Summary: {self.run_id}",
@@ -125,6 +168,25 @@ class RunLogger:
                 f"- Cost: ${u.total_cost:.4f}",
                 "",
             ])
+            if u.by_model:
+                lines.append("### By Model")
+                for model, stats in u.by_model.items():
+                    lines.append(f"- **{model}**: {stats.invocations} calls, {stats.total_tokens:,} tokens, ${stats.cost:.4f}")
+                lines.append("")
+        # Per-step timing table
+        if step_timings:
+            lines.extend(["## Per-Step Timing", ""])
+            lines.append("| Step | Cleanup | LLM | Execute | Total |")
+            lines.append("|------|---------|-----|---------|-------|")
+            steps_seen = sorted(set(s for s, _, _ in step_timings))
+            for step in steps_seen:
+                by_phase = {p: d for s, p, d in step_timings if s == step}
+                cleanup = by_phase.get('cleanup', 0)
+                llm = by_phase.get('llm_inference', 0)
+                execute = by_phase.get('execute_actions', 0)
+                total = by_phase.get('total', 0)
+                lines.append(f"| {step} | {cleanup/1000:.1f}s | {llm/1000:.1f}s | {execute/1000:.1f}s | {total/1000:.1f}s |")
+            lines.append("")
         lines.extend([
             "## Files",
             f"- Screenshots: {len(list((self.run_dir / 'screenshots').glob('*.png')))}",
@@ -152,6 +214,8 @@ class SkillInfo:
     description: str
     body: str              # Full SKILL.md body (after frontmatter)
     script: str | None     # JS function body (script skills only)
+    hook_module: ModuleType | None = field(default=None, repr=False)  # Python hook (hook.py)
+    prompt_text: str | None = None  # System prompt extension (prompt.txt)
 
 
 def parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -160,7 +224,6 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
     if not m:
         return {}, text
     yaml_block, body = m.group(1), m.group(2)
-    # Simple key: value parser (handles multiline > values)
     meta = {}
     current_key = None
     current_val = []
@@ -194,12 +257,29 @@ def load_skills(skills_dir: Path | str | None = None) -> list[SkillInfo]:
         script_path = skill_md.parent / "script.js"
         if script_path.exists():
             script = script_path.read_text().strip()
+        # Load Python hook module if present
+        hook_module = None
+        hook_path = skill_md.parent / "hook.py"
+        if hook_path.exists():
+            spec = importlib.util.spec_from_file_location(
+                f"skill_hook_{frontmatter['name']}", hook_path
+            )
+            if spec and spec.loader:
+                hook_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(hook_module)
+        # Load prompt extension if present
+        prompt_text = None
+        prompt_path = skill_md.parent / "prompt.txt"
+        if prompt_path.exists():
+            prompt_text = prompt_path.read_text().strip()
         skills.append(SkillInfo(
             name=frontmatter["name"],
             skill_type=frontmatter.get("type", "knowledge"),
             description=frontmatter.get("description", "").strip(),
             body=body.strip(),
             script=script,
+            hook_module=hook_module,
+            prompt_text=prompt_text,
         ))
     return skills
 
@@ -272,7 +352,6 @@ FAMILY_DEFAULTS = {
 def get_fallback(model_key: str) -> str:
     """Get the fallback model from another family."""
     my_family = MODELS[model_key]["family"]
-    # Fallback chain: anthropic → gemini → kimi → gemini
     fallback_order = {"anthropic": "gemini", "anthropic-api": "gemini", "gemini": "kimi", "kimi": "gemini"}
     other_family = fallback_order.get(my_family, "gemini")
     return FAMILY_DEFAULTS[other_family]
@@ -281,16 +360,14 @@ def get_fallback(model_key: str) -> str:
 def get_llm(model_key: str):
     """Get LLM instance by model key."""
     if model_key == "claude":
-        # Claude via local proxy (Max subscription) — OpenAI-compatible API
         return ChatOpenAI(
             model="claude-sonnet-4-5-20250929",
             api_key="not-needed",
-            base_url="http://127.0.0.1:8000/v1",
+            base_url="http://127.0.0.1:8001/v1",
             temperature=0.0,
         )
 
     elif model_key == "claude-api":
-        # Claude via direct Anthropic API (pay-per-token)
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY environment variable required")
@@ -309,7 +386,7 @@ def get_llm(model_key: str):
             model="kimi-k2.5",
             api_key=api_key,
             base_url="https://api.moonshot.ai/v1",
-            temperature=1.0,  # K2.5 requires temperature=1.0
+            temperature=1.0,
             frequency_penalty=0.0,
             remove_min_items_from_schema=True,
             remove_defaults_from_schema=True,
@@ -356,10 +433,10 @@ def get_llm(model_key: str):
 # Screenshot stream: rolling buffer of timestamped frames
 # ---------------------------------------------------------------------------
 
-_frame_buffer: list[tuple[float, bytes]] = []  # [(epoch_s, png_bytes), ...]
+_frame_buffer: list[tuple[float, bytes]] = []
 _frame_task: asyncio.Task | None = None
 FRAME_MAX = 20
-FRAME_INTERVAL = 3  # seconds
+FRAME_INTERVAL = 3
 
 
 async def _screenshot_loop(get_page_fn):
@@ -377,10 +454,8 @@ async def _screenshot_loop(get_page_fn):
             else:
                 png = bytes(raw)
             _frame_buffer.append((time.time(), png))
-            # Trim oldest from memory buffer
             while len(_frame_buffer) > FRAME_MAX:
                 _frame_buffer.pop(0)
-            # Save every frame to disk for post-run review
             if _run_logger:
                 frame_num += 1
                 ts = datetime.now().strftime("%H%M%S")
@@ -397,7 +472,7 @@ def build_tools() -> Tools:
     """Build Tools instance with custom actions."""
     tools = Tools()
 
-    # --- Skills: inject_skills / read_skill / save_skill ---
+    # --- Skills: inject_skills / read_skill ---
 
     @tools.registry.action(
         description=(
@@ -470,9 +545,9 @@ def build_tools() -> Tools:
                 return ActionResult(error=f"Could not get position for element {params.index}")
             x, y = rect.x + rect.width / 2, rect.y + rect.height / 2
 
-        mouse = await page.mouse  # page.mouse is an async property, must await separately
+        mouse = await page.mouse
         await mouse.move(x, y)
-        await asyncio.sleep(1.5)  # Let hover effects trigger (needs 1s for hover_reveal, 800ms for sequence)
+        await asyncio.sleep(1.5)
 
         return ActionResult(extracted_content=f"Hovered over element {params.index}")
 
@@ -487,17 +562,14 @@ def build_tools() -> Tools:
     async def drag(params: DragParams, browser_session) -> ActionResult:
         page = await browser_session.get_current_page()
 
-        # Get source element
         src_node = await browser_session.get_element_by_index(params.source)
         if not src_node:
             return ActionResult(error=f"Source element {params.source} not found")
 
-        # Get target element
         tgt_node = await browser_session.get_element_by_index(params.target)
         if not tgt_node:
             return ActionResult(error=f"Target element {params.target} not found")
 
-        # Get coordinates
         async def get_center(node):
             if node.absolute_position:
                 r = node.absolute_position
@@ -514,8 +586,7 @@ def build_tools() -> Tools:
         if sx is None or tx is None:
             return ActionResult(error="Could not get element coordinates")
 
-        # Perform drag with smooth movement
-        mouse = await page.mouse  # page.mouse is an async property
+        mouse = await page.mouse
         await mouse.move(sx, sy)
         await mouse.down()
         for step in range(1, 11):
@@ -550,7 +621,7 @@ def build_tools() -> Tools:
                 return ActionResult(error=f"Could not get bounds for element {params.index}")
             ox, oy, w, h = rect.x, rect.y, rect.width, rect.height
 
-        mouse = await page.mouse  # page.mouse is an async property
+        mouse = await page.mouse
         margin = min(20, w * 0.1)
         for i in range(params.strokes):
             y_frac = (i + 1) / (params.strokes + 1)
@@ -647,7 +718,6 @@ def build_tools() -> Tools:
         param_model=DoneAction,
     )
     async def done(params: DoneAction, browser_session) -> ActionResult:
-        # Check page for completion signals before allowing termination
         try:
             page = await browser_session.get_current_page()
             page_text = await page.evaluate(
@@ -658,22 +728,14 @@ def build_tools() -> Tools:
             page_text = ""
             page_url = ""
 
-        # Look for completion signals (generalizable patterns)
         completion_signals = [
-            "congratulations", "all steps completed", "challenge complete",
-            "you did it", "well done", "finished", "all done",
+            "congratulations", "all steps completed", "all 30 steps",
+            "you did it", "all done", "challenge arena complete",
         ]
         text_lower = page_text.lower()
         is_complete = any(sig in text_lower for sig in completion_signals)
 
-        # Also accept if we've advanced past step 1 (for single-challenge testing)
-        import re
-        step_match = re.search(r'step\s*(\d+)\s*(?:of|/)', text_lower)
-        if step_match and int(step_match.group(1)) > 1:
-            is_complete = True
-
-        if is_complete or params.success is False:
-            # Actually done — allow termination
+        if is_complete:
             return ActionResult(
                 is_done=True,
                 success=params.success,
@@ -681,7 +743,6 @@ def build_tools() -> Tools:
                 long_term_memory=f"Task completed: {params.success} - {params.text[:100]}",
             )
         else:
-            # Not done — refuse and tell agent to keep going
             return ActionResult(
                 is_done=False,
                 extracted_content=(
@@ -696,142 +757,18 @@ def build_tools() -> Tools:
     return tools
 
 
-SYSTEM_PROMPT = """You are an efficient web automation agent. Follow the task instructions carefully.
+# ---------------------------------------------------------------------------
+# Step timing tracking (general, not challenge-specific)
+# ---------------------------------------------------------------------------
 
-EFFICIENCY RULES:
-- Think in 1-2 sentences max. Act immediately.
-- Always check #__pre_solve_results first — the pre_solve skill runs AUTOMATICALLY before
-  each step and may have already performed actions or auto-submitted.
-- Combine actions: input + click in one step.
-- If stuck after 2 attempts, use search_dom or try a completely different approach.
-- Never click decoy navigation buttons (Next, Continue, Go Forward, Click Me).
-"""
+_step_timings: list[tuple[int, str, float]] = []
 
 
-_step_timings = []  # [(step_num, phase, duration_ms), ...]
-_last_page_url = None
-_same_url_count = 0
-
-
-async def pre_step_cleanup(agent):
-    """Auto-run cleanup before each step's DOM snapshot.
-
-    1. dismiss_popups: hide modal overlays via exclude attr
-    2. clean_dom: deduplicate repetitive text/interactive elements
-    3. observe_changes: start observer + inject change summary into DOM
-
-    Uses data-browser-use-exclude attribute so excluded elements are
-    invisible to the serializer.
-    """
-    global _last_page_url, _same_url_count
-    t0 = time.time()
-    step_n = agent.state.n_steps
-    try:
-        page = await agent.browser_session.get_current_page()
-
-        # Stuck detection: track how many steps on the same URL
-        current_url = await page.evaluate("() => window.location.href")
-        if current_url == _last_page_url:
-            _same_url_count += 1
-        else:
-            _same_url_count = 0
-            _last_page_url = current_url
-
-        # Phase 1: Dismiss popups, clean DOM, run pre_solve (first pass)
-        first_result = await page.evaluate("""() => {
-            if (!window.__skills) return 'no_skills';
-            if (window.__skills.dismiss_popups) window.__skills.dismiss_popups();
-            if (window.__skills.clean_dom) window.__skills.clean_dom();
-            if (window.__skills.pre_solve) return window.__skills.pre_solve();
-            return 'no_pre_solve';
-        }""")
-        print(f"[pre_step_cleanup] Phase 1 result: {str(first_result)[:120]}")
-
-        # Phase 1.5: If sequence challenge hover coords detected, use real mouse movement
-        # (dispatchEvent(mouseenter) doesn't trigger native listeners in headless Chromium)
-        did_hover = False
-        if first_result and "AUTO-SUBMITTED" not in str(first_result):
-            hover_coords = await page.evaluate("() => window.__seqHoverCoords ? JSON.stringify(window.__seqHoverCoords) : null")
-            if hover_coords:
-                import json
-                coords = json.loads(hover_coords) if isinstance(hover_coords, str) else hover_coords
-                mouse = await page.mouse
-                await mouse.move(coords['x'], coords['y'])
-                await asyncio.sleep(1.5)  # 800ms hover timer + 700ms margin
-                await page.evaluate("() => { window.__seqHoverDone = true; delete window.__seqHoverCoords; }")
-                print(f"[pre_step_cleanup] Phase 1.5: moved mouse to hover area ({coords['x']:.0f}, {coords['y']:.0f})")
-                did_hover = True
-
-            # Phase 2: Wait for delayed content and retry.
-            # This catches delayed_reveal (3s timer) and timed challenges without slowing
-            # down steps that pre_solve already handled.
-            remaining_wait = 3.5 if did_hover else 5
-            await asyncio.sleep(remaining_wait)
-            second_result = await page.evaluate("""() => {
-                if (window.__skills && window.__skills.pre_solve) return window.__skills.pre_solve();
-                return 'no_pre_solve';
-            }""")
-            if second_result and str(second_result) != 'no_pre_solve':
-                print(f"[pre_step_cleanup] Phase 2 result: {str(second_result)[:120]}")
-
-        # Phase 3: DOM cleanup and metadata injection
-        await page.evaluate("""() => {
-            window.scrollTo(0, 0);
-
-            var tsEl = document.getElementById('__agent-timestamp');
-            if (!tsEl) {
-                tsEl = document.createElement('div');
-                tsEl.id = '__agent-timestamp';
-                tsEl.style.cssText = 'font-size:11px;color:#888;';
-                if (document.body.firstChild) document.body.insertBefore(tsEl, document.body.firstChild);
-            }
-            var now = new Date();
-            tsEl.textContent = 'Agent time: ' + now.toISOString() + ' (epoch: ' + Date.now() + ')';
-
-            // Stuck detection warning
-            var stuckCount = """ + str(_same_url_count) + """;
-            var stuckEl = document.getElementById('__stuck-warning');
-            if (stuckCount >= 5) {
-                if (!stuckEl) {
-                    stuckEl = document.createElement('div');
-                    stuckEl.id = '__stuck-warning';
-                    stuckEl.style.cssText = 'font-size:14px;color:red;font-weight:bold;padding:8px;border:2px solid red;margin:8px 0;background:#fff0f0;';
-                    if (document.body.firstChild) document.body.insertBefore(stuckEl, document.body.firstChild);
-                }
-                stuckEl.textContent = 'WARNING: You have been on this same page for ' + stuckCount + ' steps. STOP repeating the same actions. Try: (1) Read the challenge description carefully, (2) Look for the actual code, (3) Type the code and click Submit Code button.';
-            } else if (stuckEl) {
-                stuckEl.remove();
-            }
-
-            if (window.__skills && window.__skills.observe_changes) {
-                var result = window.__skills.observe_changes();
-                var existing = document.getElementById('__dom-changes-summary');
-                if (existing) existing.remove();
-                if (result && result.indexOf('changes') !== -1 && result.indexOf('No DOM') === -1) {
-                    var el = document.createElement('div');
-                    el.id = '__dom-changes-summary';
-                    el.style.cssText = 'font-size:11px;color:#888;padding:4px;border:1px solid #ddd;margin:4px 0;';
-                    el.textContent = result;
-                    if (tsEl.nextSibling) {
-                        document.body.insertBefore(el, tsEl.nextSibling);
-                    }
-                }
-                if (window.__domChangeLog) window.__domChangeLog = [];
-            }
-        }""")
-    except Exception as e:
-        print(f"[pre_step_cleanup] ERROR: {e}")
-    cleanup_ms = (time.time() - t0) * 1000
-    _step_timings.append((step_n, 'cleanup', cleanup_ms))
-    ts = time.strftime('%H:%M:%S')
-    print(f"[{ts}][Step {step_n}] pre_step_cleanup: {cleanup_ms:.0f}ms")
-
-
-async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, headless: bool = False):
+async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
+                    headless: bool = False, max_runs: int = MAX_RUNS_DEFAULT):
     """Run the browser automation agent with automatic fallback."""
     global _run_logger
 
-    # Keep task string lean — detailed goal goes into system prompt (cached)
     task = f"Navigate to {url} and complete this goal: {goal}"
     models_to_try = [model_key, fallback_key]
 
@@ -850,8 +787,9 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
         print(f"Goal: {goal[:80]}{'...' if len(goal) > 80 else ''}")
         print(f"{'='*60}\n")
 
-        # Initialize run logger
-        _run_logger = RunLogger(agent_name="browser-use", url=url, goal=goal)
+        # Initialize run logger (triggers FIFO cleanup)
+        _run_logger = RunLogger(agent_name="browser-use", url=url, goal=goal,
+                                max_runs=max_runs)
         print(f"[Agent] Logging to: {_run_logger.run_dir}")
 
         browser = None
@@ -863,12 +801,46 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
             all_skills = load_skills()
             skills_prompt = generate_skills_prompt(all_skills)
 
-            # Create browser separately so we can clean it up properly
+            # Collect skill hooks and prompt extensions
+            skill_hooks = []
+            prompt_parts = []
+            for s in all_skills:
+                if s.hook_module and hasattr(s.hook_module, 'on_step_start'):
+                    skill_hooks.append(s.hook_module.on_step_start)
+                    print(f"[Agent] Loaded hook: {s.name}")
+                if s.prompt_text:
+                    prompt_parts.append(s.prompt_text)
+                    print(f"[Agent] Loaded prompt extension: {s.name}")
+
+            # Build combined system message from skill prompts (no hardcoded prompt)
+            system_prompt = "\n\n".join(prompt_parts) if prompt_parts else ""
+            if skills_prompt:
+                system_prompt = system_prompt + "\n" + skills_prompt if system_prompt else skills_prompt
+
+            # Combined on_step_start: run all skill hooks, first skip_llm wins
+            async def combined_on_step_start(agent):
+                for hook in skill_hooks:
+                    result = await hook(agent)
+                    if isinstance(result, dict) and result.get("skip_llm"):
+                        agent._skip_llm = result
+                        break
+
             browser = Browser(
                 headless=headless,
                 viewport={"width": 1280, "height": 800},
                 disable_security=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
+                user_data_dir=str(Path(__file__).parent / "browser-data"),
+                downloads_path=str(Path(__file__).parent / "downloads"),
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-software-rasterizer",
+                    "--disable-background-timer-throttling",
+                    "--disable-renderer-backgrounding",
+                    "--disable-features=VizDisplayCompositor",
+                    "--js-flags=--max-old-space-size=512",
+                ],
             )
 
             agent = Agent(
@@ -877,32 +849,92 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                 browser=browser,
                 use_vision=model_info["vision"],
                 controller=tools,
-                extend_system_message=SYSTEM_PROMPT + skills_prompt,
+                extend_system_message=system_prompt,
                 initial_actions=[
-                    {"inject_skills": {}},  # Inject skills first (persists via CDP init script)
-                    {"navigate": {"url": url}},  # Then navigate
+                    {"inject_skills": {}},
+                    {"navigate": {"url": url}},
                 ],
-                # Performance optimizations (documented browser-use options)
-                max_history_items=10,
-                use_judge=False,  # Skip extra LLM evaluation call
-                # NOTE: Don't use vision_detail_level="low" or small screenshots
-                # - it causes the model to hallucinate codes instead of reading them
-                save_conversation_path="/tmp/agent-conv",
+                max_actions_per_step=5,
+                max_history_items=6,
+                use_judge=False,
+                flash_mode=True,
+                llm_timeout=120,
+                save_conversation_path=str(Path(__file__).parent / "logs" / "agent-conv"),
             )
+
+            # --- Instrument Agent internals for per-segment timing + LLM skip ---
+            _orig_prepare = agent._prepare_context
+            _orig_get_action = agent._get_next_action
+            _orig_execute = agent._execute_actions
+            _orig_post = agent._post_process
+
+            async def timed_prepare(step_info=None):
+                t = time.time()
+                result = await _orig_prepare(step_info)
+                ms = (time.time() - t) * 1000
+                _step_timings.append((agent.state.n_steps, 'prepare_context', ms))
+                print(f"  [{time.strftime('%H:%M:%S')}][Step {agent.state.n_steps}][prepare_context] {ms:.0f}ms")
+                return result
+
+            # Build synthetic wait action model for LLM-skip
+            from pydantic import create_model as _cm
+            _WaitModel = _cm('WaitModel', __base__=_ActionModelBase,
+                             wait=(dict | None, None))
+
+            async def timed_get_action(browser_state_summary):
+                # LLM-skip: if a hook signaled skip_llm, construct synthetic output
+                if hasattr(agent, '_skip_llm') and agent._skip_llm:
+                    skip_info = agent._skip_llm
+                    agent._skip_llm = None
+                    reason = skip_info.get('reason', 'hook')
+                    print(f"  [{time.strftime('%H:%M:%S')}][Step {agent.state.n_steps}][llm_skip] {reason}")
+                    _step_timings.append((agent.state.n_steps, 'llm_inference', 0))
+                    agent.state.last_model_output = AgentOutput(
+                        evaluation_previous_goal='Auto-handled by skill hook',
+                        memory=f"Auto-handled: {reason}",
+                        next_goal='Wait for page transition',
+                        action=[_WaitModel(wait={'seconds': 1})],
+                    )
+                    return
+                t = time.time()
+                result = await _orig_get_action(browser_state_summary)
+                ms = (time.time() - t) * 1000
+                _step_timings.append((agent.state.n_steps, 'llm_inference', ms))
+                print(f"  [{time.strftime('%H:%M:%S')}][Step {agent.state.n_steps}][llm_inference] {ms:.0f}ms")
+                return result
+
+            async def timed_execute():
+                t = time.time()
+                result = await _orig_execute()
+                ms = (time.time() - t) * 1000
+                _step_timings.append((agent.state.n_steps, 'execute_actions', ms))
+                print(f"  [{time.strftime('%H:%M:%S')}][Step {agent.state.n_steps}][execute_actions] {ms:.0f}ms")
+                return result
+
+            async def timed_post():
+                t = time.time()
+                result = await _orig_post()
+                ms = (time.time() - t) * 1000
+                _step_timings.append((agent.state.n_steps, 'post_process', ms))
+                print(f"  [{time.strftime('%H:%M:%S')}][Step {agent.state.n_steps}][post_process] {ms:.0f}ms")
+                return result
+
+            agent._prepare_context = timed_prepare
+            agent._get_next_action = timed_get_action
+            agent._execute_actions = timed_execute
+            agent._post_process = timed_post
 
             async def post_step_log(agent):
                 step_n = agent.state.n_steps
                 step_time = time.time() - agent.step_start_time if hasattr(agent, 'step_start_time') else 0
                 _step_timings.append((step_n, 'total', step_time * 1000))
-                ts = time.strftime('%H:%M:%S')
-                print(f"[{ts}][Step {step_n}] total: {step_time:.1f}s")
+                print(f"[{time.strftime('%H:%M:%S')}][Step {step_n}] total: {step_time:.1f}s")
 
                 if _run_logger:
                     try:
                         page = await agent.browser_session.get_current_page()
                         await _run_logger.save_screenshot(page, step_n)
 
-                        # Capture and save DOM events
                         dom_events = await page.evaluate(
                             "() => window.__domChangeLog ? [...window.__domChangeLog] : []"
                         )
@@ -911,7 +943,6 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                     except Exception as e:
                         print(f"[RunLogger] Post-step capture failed: {e}")
 
-                    # Save LLM conversation state for this step
                     try:
                         llm_data = {
                             "step": step_n,
@@ -942,7 +973,7 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                         print(f"[RunLogger] LLM log failed: {e}")
 
             # Auto-clean conv logs from previous runs
-            conv_dir = Path("/tmp/agent-conv")
+            conv_dir = Path(__file__).parent / "logs" / "agent-conv"
             if conv_dir.exists():
                 for f in conv_dir.glob("conversation_*.txt"):
                     f.unlink()
@@ -951,21 +982,20 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
             _step_timings.clear()
             _frame_buffer.clear()
 
-            # Start background screenshot stream
             global _frame_task
-            _frame_task = asyncio.create_task(
-                _screenshot_loop(agent.browser_session.get_current_page)
-            )
+            _frame_task = None
+
+            # Collect all step timings including from hooks
+            all_step_timings = _step_timings
 
             t0 = time.time()
             history = await agent.run(
-                max_steps=200,
-                on_step_start=pre_step_cleanup,
+                max_steps=120,
+                on_step_start=combined_on_step_start if skill_hooks else None,
                 on_step_end=post_step_log,
             )
             wall_time = time.time() - t0
 
-            # Stop screenshot stream
             if _frame_task:
                 _frame_task.cancel()
                 _frame_task = None
@@ -990,25 +1020,25 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                         print(f"  {model}: {stats.invocations} calls, {stats.total_tokens:,} tokens, ${stats.cost:.4f}")
             print(f"Success:    {history.is_successful()}")
 
-            # Step timing breakdown
-            total_times = [(s, d) for s, p, d in _step_timings if p == 'total']
-            cleanup_times = [(s, d) for s, p, d in _step_timings if p == 'cleanup']
-            if total_times:
-                avg_step = sum(d for _, d in total_times) / len(total_times) / 1000
-                max_step_n, max_step_d = max(total_times, key=lambda x: x[1])
-                min_step_n, min_step_d = min(total_times, key=lambda x: x[1])
-                print(f"\nStep timing:")
-                print(f"  Avg step:     {avg_step:.1f}s")
-                print(f"  Fastest step: {min_step_d/1000:.1f}s (step {min_step_n})")
-                print(f"  Slowest step: {max_step_d/1000:.1f}s (step {max_step_n})")
-            if cleanup_times:
-                avg_cleanup = sum(d for _, d in cleanup_times) / len(cleanup_times)
-                print(f"  Avg cleanup:  {avg_cleanup:.0f}ms")
+            # Merge hook timings into our timing list
+            for s in all_skills:
+                if s.hook_module and hasattr(s.hook_module, 'get_step_timings'):
+                    hook_timings = s.hook_module.get_step_timings()
+                    all_step_timings = list(all_step_timings) + list(hook_timings)
+
+            # Step timing breakdown — per-segment
+            print(f"\nTiming breakdown by segment:")
+            print(f"  {'Segment':<20s} {'Avg':>8s} {'Min':>8s} {'Max':>8s} {'Total':>8s} {'Count':>6s}")
+            print(f"  {'-'*20} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*6}")
+            for phase in ['cleanup', 'prepare_context', 'llm_inference', 'execute_actions', 'post_process', 'total']:
+                times = [d for _, p, d in all_step_timings if p == phase]
+                if times:
+                    print(f"  {phase:<20s} {sum(times)/len(times)/1000:>7.1f}s {min(times)/1000:>7.1f}s {max(times)/1000:>7.1f}s {sum(times)/1000:>7.1f}s {len(times):>6d}")
             print(f"{'='*60}")
 
             # Save run summary
             if _run_logger:
-                _run_logger.save_summary(history, wall_time, key)
+                _run_logger.save_summary(history, wall_time, key, step_timings=all_step_timings)
                 print(f"[Agent] Run logged to: {_run_logger.run_dir}")
 
             return history
@@ -1030,7 +1060,6 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str, head
                 raise
 
         finally:
-            # Always clean up browser resources
             if _frame_task and not _frame_task.done():
                 _frame_task.cancel()
                 try:
@@ -1058,7 +1087,7 @@ async def main():
     parser = argparse.ArgumentParser(
         description="Figure Agent v2",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"Models: {model_help}\n\nFallback auto-selects from the other family (kimi ↔ gemini).",
+        epilog=f"Models: {model_help}\n\nFallback auto-selects from the other family (kimi <-> gemini).",
     )
     parser.add_argument("--url", required=True, help="Starting URL")
     goal_group = parser.add_mutually_exclusive_group(required=True)
@@ -1069,6 +1098,8 @@ async def main():
     parser.add_argument("--fallback", "-f", choices=model_choices, default=None,
                         help="Fallback LLM model (default: auto from other family)")
     parser.add_argument("--headless", action="store_true", help="Run headless")
+    parser.add_argument("--max-runs", type=int, default=MAX_RUNS_DEFAULT,
+                        help=f"Max runs to keep (default: {MAX_RUNS_DEFAULT}, 0 to disable)")
 
     args = parser.parse_args()
 
@@ -1087,6 +1118,7 @@ async def main():
         model_key=args.model,
         fallback_key=fallback,
         headless=args.headless,
+        max_runs=args.max_runs,
     )
 
 
