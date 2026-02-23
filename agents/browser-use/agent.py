@@ -943,6 +943,32 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
                     except Exception as e:
                         print(f"[RunLogger] Post-step capture failed: {e}")
 
+                    # Workflow memory: record successful step transitions
+                    try:
+                        prev_step = getattr(agent, '_prev_challenge_step', None)
+                        curr_step = await page.evaluate(
+                            r"() => { var t = document.body ? document.body.textContent : ''; "
+                            r"var m = t.match(/step\s+(\d+)\s*(?:of|\/)\s*\d+/i); return m ? parseInt(m[1]) : null; }"
+                        )
+                        if prev_step is not None and curr_step is not None and curr_step != prev_step:
+                            # Step advanced — record workflow memory
+                            was_auto = hasattr(agent, '_skip_llm') and agent._skip_llm
+                            if not was_auto:
+                                features = await page.evaluate("() => window.__lastPageFeatures || {}")
+                                strategies = await page.evaluate("() => window.__lastStrategiesUsed || []")
+                                await page.evaluate("""(wf) => {
+                                    window.__workflowMemory = window.__workflowMemory || {workflows:[]};
+                                    if (window.__workflowMemory.workflows.length < 50) {
+                                        window.__workflowMemory.workflows.push(wf);
+                                    }
+                                }""", {"pageFeatures": features, "strategiesUsed": strategies, "result": "success", "stepSolved": prev_step})
+                                print(f"  [workflow] Recorded workflow for step {prev_step} -> {curr_step}")
+                            # Clear reflections on step change
+                            await page.evaluate("() => { window.__reflections = []; }")
+                        agent._prev_challenge_step = curr_step
+                    except Exception as e:
+                        print(f"  [workflow] Recording failed: {e}")
+
                     try:
                         llm_data = {
                             "step": step_n,

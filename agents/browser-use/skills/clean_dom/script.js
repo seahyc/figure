@@ -156,6 +156,35 @@ function(options) {
     } catch(e) { /* :has() not supported in older browsers */ }
   });
 
+  // Phase 2.9: DOM pruning — reduce token count for LLM (Prune4Web-inspired)
+  // Remove/mark elements that never contain challenge content to reduce DOM noise.
+  var pruneCount = 0;
+  // Strip SVG paths (keep the <svg> but hide complex path data)
+  document.querySelectorAll('svg path, svg polygon, svg polyline, svg circle, svg rect, svg line').forEach(function(el) {
+    if (shouldKeep(el)) return;
+    if (el.getAttribute(EXCLUDE_ATTR) === 'true') return;
+    markExclude(el);
+    pruneCount++;
+  });
+  // Strip script, style, noscript, link, meta (shouldn't be in accessibility tree anyway)
+  document.querySelectorAll('script, style, noscript, link[rel="stylesheet"]').forEach(function(el) {
+    if (el.getAttribute(EXCLUDE_ATTR) === 'true') return;
+    markExclude(el);
+    pruneCount++;
+  });
+  // Strip data-* attributes that waste tokens (keep data-code, data-value, data-answer, data-slot, data-part)
+  var keepDataAttrs = ['data-code', 'data-value', 'data-answer', 'data-slot', 'data-part', 'data-hover-area', 'data-scroll-box', 'data-browser-use-exclude'];
+  document.querySelectorAll('[data-testid], [data-reactid]').forEach(function(el) {
+    try {
+      Array.from(el.attributes).forEach(function(attr) {
+        if (attr.name.startsWith('data-') && keepDataAttrs.indexOf(attr.name) === -1 &&
+            attr.name !== 'data-browser-use-exclude') {
+          el.removeAttribute(attr.name);
+        }
+      });
+    } catch(e) {}
+  });
+
   // Phase 3 (aggressive): Exclude off-screen non-interactive blocks
   if (opts.aggressive) {
     var viewportBottom = window.innerHeight + window.scrollY + 500;

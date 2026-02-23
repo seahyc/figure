@@ -1,15 +1,20 @@
 Complete all 30 steps of the browser challenge.
 
+The page_assist skill handles most steps automatically. Focus your effort on steps
+where the skill reports it needs help.
+
 PATTERN FOR EACH STEP:
 1. Check #__page_assist_results first — it may have already found the code and submitted it
    - "AUTO-SUBMITTED" or "Waiting for step transition" → wait(1), done
    - "Found new codes: X" → Type X in code input, click Submit Code
+   - "Replaying workflow" → wait(2), skill is replaying a learned pattern
    - "Sequence pending" → Complete the sequence actions (type text, hover, scroll)
 2. If no code found, interact with the page to reveal it:
-   - Click challenge-specific buttons (Reveal, Play, Complete, Show)
+   - Click challenge-specific buttons (Reveal, Play, Complete, Show, Connect, Extract)
    - Sequence: type text in input, hover area, scroll box
    - After interacting: evaluate("window.__skills.page_assist()")
-3. If stuck, try: evaluate("window.__skills.search_dom({text:'[A-HJ-NP-Z2-9]{6}', regex:true})")
+3. After each interaction, always re-run the skill to check for newly revealed codes.
+4. If stuck, try: evaluate("window.__skills.search_dom({text:'[A-HJ-NP-Z2-9]{6}', regex:true})")
 
 KEY RULES:
 - Popups are auto-dismissed — do NOT call dismiss_popups() manually
