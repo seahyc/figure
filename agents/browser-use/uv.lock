@@ -225,7 +225,7 @@ wheels = [
 
 [[package]]
 name = "browser-use"
-version = "0.11.8"
+version = "0.11.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -266,9 +266,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid7" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/99/82/ce535edeae6d008c537bf816d9f5536cbc1fc0b45b5ac34e8380e390693e/browser_use-0.11.8.tar.gz", hash = "sha256:2ab22e35581f1d8cd0561814b8fabe87bcdbc1e4c5dfe56ca0ab19716f1ddbea", size = 563875, upload-time = "2026-02-03T02:01:30.666Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/e5/fe401e1536a3453e59b78eedd4096bebb340833b6f86927a3e8480a46044/browser_use-0.11.12.tar.gz", hash = "sha256:a6535d7e3b827f6c99dc26de1ebacc0336cbfcacb7073abbdaef42abf86a9feb", size = 621634, upload-time = "2026-02-23T04:38:21.39Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/66/02c329371cf52fe3c1f3f78f1e45670dbee50ee8387eef6cd3110cddcb0f/browser_use-0.11.8-py3-none-any.whl", hash = "sha256:2a967e0093716184076567103891a707f525a9b4883add082494e42122915f34", size = 675853, upload-time = "2026-02-03T02:01:28.452Z" },
+    { url = "https://files.pythonhosted.org/packages/13/7a/7dda0b089de8c08b6eebb3e30d615e9b540715394d68f5df25e1e59cb3a0/browser_use-0.11.12-py3-none-any.whl", hash = "sha256:6b58f9fcc54468cc96ab48d8d8434872cd7606980bd6942455594ab99b1f0e6f", size = 738159, upload-time = "2026-02-23T04:38:22.698Z" },
 ]
 
 [[package]]
@@ -603,7 +603,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "browser-use", specifier = ">=0.11.8" },
+    { name = "browser-use", specifier = ">=0.11.12" },
     { name = "google-genai", specifier = ">=1.61.0" },
     { name = "langchain-openai", specifier = ">=1.1.7" },
     { name = "playwright", specifier = ">=1.40.0" },

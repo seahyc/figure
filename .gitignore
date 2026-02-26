@@ -4,6 +4,9 @@ runs/
 # Agent run logs
 agents/browser-use/logs/
 
+# Runtime-generated skills (planner mode)
+agents/browser-use/skills/_runtime/
+
 # Python
 __pycache__/
 *.py[oc]

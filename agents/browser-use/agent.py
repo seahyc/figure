@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from dotenv import load_dotenv
-from browser_use import Agent, Browser
+from browser_use import Agent, Browser, ChatBrowserUse
 from browser_use.agent.views import ActionResult, AgentOutput
 from browser_use.tools.service import Tools
 from browser_use.tools.views import DoneAction
@@ -318,6 +318,11 @@ MODELS = {
         "vision": True,
         "family": "anthropic-api",
     },
+    "opus": {
+        "name": "Claude Opus (thinking, direct API)",
+        "vision": True,
+        "family": "anthropic-api",
+    },
     "kimi": {
         "name": "Kimi K2.5 (multimodal, 256K context)",
         "vision": True,
@@ -338,6 +343,21 @@ MODELS = {
         "vision": True,
         "family": "gemini",
     },
+    "gemini-2.5-pro": {
+        "name": "Gemini 2.5 Pro (thinking, full)",
+        "vision": True,
+        "family": "gemini",
+    },
+    "bu-1-0": {
+        "name": "ChatBrowserUse bu-1-0 (optimized for browser-use)",
+        "vision": True,
+        "family": "browser-use",
+    },
+    "bu-2-0": {
+        "name": "ChatBrowserUse bu-2-0 (premium browser-use model)",
+        "vision": True,
+        "family": "browser-use",
+    },
 }
 
 # Default model per family (used for auto-fallback)
@@ -346,13 +366,18 @@ FAMILY_DEFAULTS = {
     "anthropic-api": "claude-api",
     "kimi": "kimi",
     "gemini": "gemini",
+    "browser-use": "bu-1-0",
 }
 
 
 def get_fallback(model_key: str) -> str:
     """Get the fallback model from another family."""
     my_family = MODELS[model_key]["family"]
-    fallback_order = {"anthropic": "gemini", "anthropic-api": "gemini", "gemini": "kimi", "kimi": "gemini"}
+    fallback_order = {
+        "anthropic": "gemini", "anthropic-api": "gemini",
+        "gemini": "kimi", "kimi": "gemini",
+        "browser-use": "gemini",
+    }
     other_family = fallback_order.get(my_family, "gemini")
     return FAMILY_DEFAULTS[other_family]
 
@@ -425,6 +450,39 @@ def get_llm(model_key: str):
             thinking_budget=0,
         )
 
+    elif model_key == "opus":
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if api_key:
+            return ChatAnthropic(
+                model="claude-opus-4-20250514",
+                api_key=api_key,
+                temperature=1.0,
+                max_tokens=16384,
+            )
+        # Fall back to local proxy
+        return ChatOpenAI(
+            model="claude-opus-4-20250514",
+            api_key="not-needed",
+            base_url="http://127.0.0.1:8001/v1",
+            temperature=1.0,
+        )
+
+    elif model_key == "gemini-2.5-pro":
+        api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY required")
+        return ChatGoogle(
+            model="gemini-2.5-pro",
+            api_key=api_key,
+        )
+
+    elif model_key in ("bu-1-0", "bu-2-0"):
+        api_key = os.getenv("BROWSER_USE_API_KEY")
+        if not api_key:
+            raise ValueError("BROWSER_USE_API_KEY environment variable required")
+        model_name = "bu-1-0" if model_key == "bu-1-0" else "bu-2-0"
+        return ChatBrowserUse(model=model_name)
+
     else:
         raise ValueError(f"Unknown model: {model_key}. Available: {list(MODELS.keys())}")
 
@@ -484,6 +542,19 @@ def build_tools() -> Tools:
     async def inject_skills(browser_session) -> ActionResult:
         skills = load_skills()
         injected = []
+
+        # Inject framework interaction primitives (__FW namespace)
+        try:
+            fw_js_path = Path(__file__).parent / "skills" / "frameworks" / "react.js"
+            if fw_js_path.exists():
+                fw_js = fw_js_path.read_text()
+                await browser_session._cdp_add_init_script(fw_js)
+                page = await browser_session.get_current_page()
+                await page.evaluate(f"() => {{ {fw_js} }}")
+                injected.append("__FW")
+        except Exception as e:
+            print(f"[Agent] Warning: failed to inject framework helpers: {e}")
+
         for s in skills:
             if s.script:
                 js = f"window.__skills = window.__skills || {{}}; window.__skills.{s.name} = {s.script};"
@@ -765,7 +836,8 @@ _step_timings: list[tuple[int, str, float]] = []
 
 
 async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
-                    headless: bool = False, max_runs: int = MAX_RUNS_DEFAULT):
+                    headless: bool = False, max_runs: int = MAX_RUNS_DEFAULT,
+                    classifier_enabled: bool = False, use_vision: bool = False):
     """Run the browser automation agent with automatic fallback."""
     global _run_logger
 
@@ -799,6 +871,14 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
 
             # Auto-discover skills and generate prompt section
             all_skills = load_skills()
+
+            # When classifier is enabled, exclude page_assist (challenge-specific hook)
+            # so only the generic interact hook runs
+            if classifier_enabled:
+                excluded = {"page_assist"}
+                all_skills = [s for s in all_skills if s.name not in excluded]
+                print(f"[Agent] Classifier mode: excluded challenge-specific skills: {excluded}")
+
             skills_prompt = generate_skills_prompt(all_skills)
 
             # Collect skill hooks and prompt extensions
@@ -817,6 +897,13 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
             if skills_prompt:
                 system_prompt = system_prompt + "\n" + skills_prompt if system_prompt else skills_prompt
 
+            # Enable classifier in interact hook if requested
+            if classifier_enabled:
+                for s in all_skills:
+                    if s.hook_module and hasattr(s.hook_module, 'set_classifier_enabled'):
+                        s.hook_module.set_classifier_enabled(True)
+                        print(f"[Agent] Classifier enabled in {s.name} hook")
+
             # Combined on_step_start: run all skill hooks, first skip_llm wins
             async def combined_on_step_start(agent):
                 for hook in skill_hooks:
@@ -829,7 +916,6 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
                 headless=headless,
                 viewport={"width": 1280, "height": 800},
                 disable_security=True,
-                user_data_dir=str(Path(__file__).parent / "browser-data"),
                 downloads_path=str(Path(__file__).parent / "downloads"),
                 args=[
                     "--no-sandbox",
@@ -847,7 +933,7 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
                 task=task,
                 llm=llm,
                 browser=browser,
-                use_vision=model_info["vision"],
+                use_vision=use_vision,
                 controller=tools,
                 extend_system_message=system_prompt,
                 initial_actions=[
@@ -876,10 +962,12 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
                 print(f"  [{time.strftime('%H:%M:%S')}][Step {agent.state.n_steps}][prepare_context] {ms:.0f}ms")
                 return result
 
-            # Build synthetic wait action model for LLM-skip
+            # Build synthetic action models for LLM-skip
             from pydantic import create_model as _cm
             _WaitModel = _cm('WaitModel', __base__=_ActionModelBase,
                              wait=(dict | None, None))
+            _DoneModel = _cm('DoneModel', __base__=_ActionModelBase,
+                             done=(dict | None, None))
 
             async def timed_get_action(browser_state_summary):
                 # LLM-skip: if a hook signaled skip_llm, construct synthetic output
@@ -889,11 +977,21 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
                     reason = skip_info.get('reason', 'hook')
                     print(f"  [{time.strftime('%H:%M:%S')}][Step {agent.state.n_steps}][llm_skip] {reason}")
                     _step_timings.append((agent.state.n_steps, 'llm_inference', 0))
+                    # If hook signals challenge is done, tell agent to finish
+                    if skip_info.get('done'):
+                        print(f"    [agent] Challenge complete! Signaling done.")
+                        agent.state.last_model_output = AgentOutput(
+                            evaluation_previous_goal='Challenge completed successfully!',
+                            memory='All 30 challenge steps completed. On /finish page.',
+                            next_goal='Task is complete.',
+                            action=[_DoneModel(done={'text': 'Challenge completed - all 30 steps done!', 'success': True})],
+                        )
+                        return
                     agent.state.last_model_output = AgentOutput(
                         evaluation_previous_goal='Auto-handled by skill hook',
-                        memory=f"Auto-handled: {reason}",
-                        next_goal='Wait for page transition',
-                        action=[_WaitModel(wait={'seconds': 1})],
+                        memory=f"Auto-handled: {reason}. IMPORTANT: Stay on current page. NEVER navigate to other URLs. The challenge is a SPA at the root URL.",
+                        next_goal='Wait for page transition. Do NOT navigate away.',
+                        action=[_WaitModel(wait={'seconds': 2})],
                     )
                     return
                 t = time.time()
@@ -943,32 +1041,6 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
                     except Exception as e:
                         print(f"[RunLogger] Post-step capture failed: {e}")
 
-                    # Workflow memory: record successful step transitions
-                    try:
-                        prev_step = getattr(agent, '_prev_challenge_step', None)
-                        curr_step = await page.evaluate(
-                            r"() => { var t = document.body ? document.body.textContent : ''; "
-                            r"var m = t.match(/step\s+(\d+)\s*(?:of|\/)\s*\d+/i); return m ? parseInt(m[1]) : null; }"
-                        )
-                        if prev_step is not None and curr_step is not None and curr_step != prev_step:
-                            # Step advanced — record workflow memory
-                            was_auto = hasattr(agent, '_skip_llm') and agent._skip_llm
-                            if not was_auto:
-                                features = await page.evaluate("() => window.__lastPageFeatures || {}")
-                                strategies = await page.evaluate("() => window.__lastStrategiesUsed || []")
-                                await page.evaluate("""(wf) => {
-                                    window.__workflowMemory = window.__workflowMemory || {workflows:[]};
-                                    if (window.__workflowMemory.workflows.length < 50) {
-                                        window.__workflowMemory.workflows.push(wf);
-                                    }
-                                }""", {"pageFeatures": features, "strategiesUsed": strategies, "result": "success", "stepSolved": prev_step})
-                                print(f"  [workflow] Recorded workflow for step {prev_step} -> {curr_step}")
-                            # Clear reflections on step change
-                            await page.evaluate("() => { window.__reflections = []; }")
-                        agent._prev_challenge_step = curr_step
-                    except Exception as e:
-                        print(f"  [workflow] Recording failed: {e}")
-
                     try:
                         llm_data = {
                             "step": step_n,
@@ -1014,10 +1086,13 @@ async def run_agent(url: str, goal: str, model_key: str, fallback_key: str,
             # Collect all step timings including from hooks
             all_step_timings = _step_timings
 
+            combined_on_step_start_final = combined_on_step_start if skill_hooks else None
+
             t0 = time.time()
+
             history = await agent.run(
                 max_steps=120,
-                on_step_start=combined_on_step_start if skill_hooks else None,
+                on_step_start=combined_on_step_start_final,
                 on_step_end=post_step_log,
             )
             wall_time = time.time() - t0
@@ -1126,6 +1201,10 @@ async def main():
     parser.add_argument("--headless", action="store_true", help="Run headless")
     parser.add_argument("--max-runs", type=int, default=MAX_RUNS_DEFAULT,
                         help=f"Max runs to keep (default: {MAX_RUNS_DEFAULT}, 0 to disable)")
+    parser.add_argument("--classifier", action="store_true",
+                        help="Enable Tier 1 classifier (Gemini Flash) for page interaction classification")
+    parser.add_argument("--vision", action="store_true",
+                        help="Enable vision/screenshots (default: DOM-only for speed)")
 
     args = parser.parse_args()
 
@@ -1145,6 +1224,8 @@ async def main():
         fallback_key=fallback,
         headless=args.headless,
         max_runs=args.max_runs,
+        classifier_enabled=args.classifier,
+        use_vision=args.vision,
     )
 
 
