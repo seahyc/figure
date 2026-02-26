@@ -599,6 +599,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "playwright" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -608,6 +609,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.1.7" },
     { name = "playwright", specifier = ">=1.40.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
 ]
 
 [[package]]

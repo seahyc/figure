@@ -1,0 +1,106 @@
+# Task Curriculum: 10 real-world tasks + 1 challenge
+# Inspired by WebVoyager (643 tasks, 15 websites) and BrowseComp benchmarks.
+# All on real production sites, no login required.
+
+- id: flight-search
+  url: https://www.google.com/travel/flights
+  description: |
+    Find the cheapest round-trip flight from Beijing (PEK) to Singapore (SIN)
+    with at most 1 layover, departing ~2 weeks from now, returning ~3 weeks
+    from now. Report price, airline, dates, and layover city.
+  reward_type: llm_judge
+  expected_criteria: "Plausible price + airline + route for PEK-SIN"
+
+- id: hotel-comparison
+  url: https://www.booking.com
+  description: |
+    Find the cheapest available hotel room in central Tokyo for a 3-night stay
+    starting next Friday for 2 adults. Report the hotel name, price per night,
+    rating, and distance from Tokyo Station.
+  reward_type: llm_judge
+  expected_criteria: "Real hotel with plausible price in Tokyo"
+
+- id: product-research
+  url: https://www.amazon.com
+  description: |
+    Search for wireless noise-cancelling headphones under $200 with at least
+    4-star rating. Compare the top 3 options and report name, price, rating,
+    and battery life for each.
+  reward_type: llm_judge
+  expected_criteria: "3 real products with specs"
+
+- id: recipe-search
+  url: https://www.allrecipes.com
+  description: |
+    Find a vegetarian pasta recipe that takes less than 30 minutes to prepare,
+    has at least 4.5 stars, and serves 4 people. Report the recipe name, total
+    time, ingredients count, and rating.
+  reward_type: llm_judge
+  expected_criteria: "Real recipe matching constraints"
+
+- id: news-extraction
+  url: https://www.bbc.com/news
+  description: |
+    Find today's top 3 headlines in world news. For each, report the headline,
+    source, and a one-sentence summary.
+  reward_type: llm_judge
+  expected_criteria: "Real current headlines from BBC"
+
+- id: academic-search
+  url: https://arxiv.org
+  description: |
+    Find a highly-cited paper about "reinforcement learning for web agents"
+    published in 2024 or 2025 on arXiv. Report the title, authors, and abstract.
+  reward_type: llm_judge
+  expected_criteria: "Real paper exists on arXiv"
+
+- id: job-market
+  url: https://www.figure.ai/careers
+  description: |
+    Go to Figure AI's careers page and count all open positions. Group them by
+    department and report the total count and the department with the most openings.
+  reward_type: llm_judge
+  expected_criteria: "Plausible count + departments"
+
+- id: course-discovery
+  url: https://www.coursera.org
+  description: |
+    Find a free online course about machine learning that is beginner-friendly,
+    takes less than 20 hours, and has at least 4.5 stars. Report course name,
+    instructor, platform, duration, and rating.
+  reward_type: llm_judge
+  expected_criteria: "Real course matching constraints"
+
+- id: map-routing
+  url: https://www.google.com/maps
+  description: |
+    Plan a driving route from San Francisco International Airport to Stanford
+    University. Report the distance, estimated drive time, and the route via
+    highway names.
+  reward_type: llm_judge
+  expected_criteria: "Plausible route + time (~30-40 min)"
+
+- id: math-computation
+  url: https://www.wolframalpha.com
+  description: |
+    Use Wolfram Alpha to compute the integral of sin(x)*e^x from 0 to pi.
+    Report the exact symbolic result and the numerical approximation.
+  reward_type: llm_judge
+  expected_criteria: "Numerical result approximately 12.0703"
+
+- id: challenge-30step
+  url: https://serene-frangipane-7fd25b.netlify.app/
+  description: |
+    Complete all 30 steps of the browser challenge. Each step presents a different
+    interaction puzzle (clicking, hovering, dragging, drawing on canvas, keyboard
+    sequences, scrolling, shadow DOM, iframes, math problems, and more).
+
+    After solving each puzzle, a 6-character alphanumeric code appears somewhere on
+    the page. Find it, enter it in the code input field, and click "Submit Code" to
+    advance to the next step.
+
+    IMPORTANT: Do NOT click decoy navigation buttons (Next, Continue, Proceed, etc).
+    Only "Submit Code" advances steps. The code uses characters A-HJ-NP-Z2-9
+    (no I, O, 0, 1).
+  reward_type: progress
+  reward_pattern: "Step\\s+(\\d+)"
