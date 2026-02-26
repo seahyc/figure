@@ -197,6 +197,23 @@ async def execute_click(page, params: dict) -> dict:
                     } catch(e) {}
                 }
 
+                // Check if submit button inside a form with React onSubmit
+                if (match.type === 'submit' || (match.tagName === 'BUTTON' && !match.type)) {
+                    var form = match.closest('form');
+                    if (form) {
+                        var fk = Object.keys(form).find(function(k) { return k.indexOf('__reactProps') === 0; });
+                        if (fk && form[fk] && form[fk].onSubmit) {
+                            try {
+                                form[fk].onSubmit({
+                                    preventDefault:function(){},stopPropagation:function(){},
+                                    target:form,currentTarget:form
+                                });
+                                return JSON.stringify({ok: true, method: 'form-submit', label: match.textContent.trim().substring(0, 40)});
+                            } catch(e) {}
+                        }
+                    }
+                }
+
                 // Return coords for Playwright trusted click
                 return JSON.stringify({ok: true, method: 'playwright', x: x, y: y, label: match.textContent.trim().substring(0, 40)});
             }""", text)
