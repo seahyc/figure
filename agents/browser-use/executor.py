@@ -281,10 +281,24 @@ async def execute_type(page, params: dict) -> dict:
             }
             // Strategy 2: placeholder match
             if (!input && placeholder) {
+                var hint = placeholder.toLowerCase();
                 var inputs = document.querySelectorAll('input, textarea');
                 for (var i = 0; i < inputs.length; i++) {
                     var ph = (inputs[i].placeholder || '').toLowerCase();
-                    if (ph.indexOf(placeholder.toLowerCase()) !== -1) { input = inputs[i]; break; }
+                    if (ph && ph.indexOf(hint) !== -1) { input = inputs[i]; break; }
+                }
+                // Also try matching by name, id, or type
+                if (!input) {
+                    for (var i = 0; i < inputs.length; i++) {
+                        var inp = inputs[i];
+                        if (inp.offsetWidth === 0 || inp.offsetHeight === 0) continue;
+                        var n = (inp.name || '').toLowerCase();
+                        var id = (inp.id || '').toLowerCase();
+                        var t = (inp.type || '').toLowerCase();
+                        if (n.indexOf(hint) !== -1 || id.indexOf(hint) !== -1 || hint.indexOf(t) !== -1 || t.indexOf(hint) !== -1) {
+                            input = inp; break;
+                        }
+                    }
                 }
             }
             // Strategy 3: first visible text input
@@ -358,10 +372,24 @@ async def execute_fill_form(page, params: dict) -> dict:
         var input = null;
 
         if (hint) {
+            var h = hint.toLowerCase();
             var inputs = document.querySelectorAll('input, textarea');
             for (var i = 0; i < inputs.length; i++) {
                 var ph = (inputs[i].placeholder || '').toLowerCase();
-                if (ph.indexOf(hint.toLowerCase()) !== -1) { input = inputs[i]; break; }
+                if (ph && ph.indexOf(h) !== -1) { input = inputs[i]; break; }
+            }
+            // Also try matching by name, id, or type
+            if (!input) {
+                for (var i = 0; i < inputs.length; i++) {
+                    var inp = inputs[i];
+                    if (inp.offsetWidth === 0 || inp.offsetHeight === 0) continue;
+                    var n = (inp.name || '').toLowerCase();
+                    var id = (inp.id || '').toLowerCase();
+                    var t = (inp.type || '').toLowerCase();
+                    if (n.indexOf(h) !== -1 || id.indexOf(h) !== -1 || h.indexOf(t) !== -1 || t.indexOf(h) !== -1) {
+                        input = inp; break;
+                    }
+                }
             }
         }
         if (!input) {
