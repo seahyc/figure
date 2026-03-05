@@ -20,6 +20,32 @@ class Observation:
     button_texts: list[str] = field(default_factory=list)
     input_fields: list[dict] = field(default_factory=list)
     page_features: dict = field(default_factory=dict)
+    changes: str = ""  # what changed since last observation
+
+    def diff_from(self, prev: 'Observation') -> str:
+        """Compute what changed since the previous observation."""
+        diffs = []
+        if self.url != prev.url:
+            diffs.append(f"URL changed: {prev.url} → {self.url}")
+        new_buttons = set(self.button_texts) - set(prev.button_texts)
+        gone_buttons = set(prev.button_texts) - set(self.button_texts)
+        if new_buttons:
+            diffs.append(f"new buttons: {list(new_buttons)[:5]}")
+        if gone_buttons:
+            diffs.append(f"removed buttons: {list(gone_buttons)[:5]}")
+        # Check for new visible text (first 200 chars diff)
+        if self.visible_text[:200] != prev.visible_text[:200]:
+            diffs.append("page content changed")
+        # Input value changes
+        prev_vals = {(i.get('name') or i.get('id') or str(idx)): i.get('value', '')
+                     for idx, i in enumerate(prev.input_fields)}
+        for idx, inp in enumerate(self.input_fields):
+            key = inp.get('name') or inp.get('id') or str(idx)
+            old_val = prev_vals.get(key, '')
+            new_val = inp.get('value', '')
+            if old_val != new_val:
+                diffs.append(f"input '{key}' value: '{old_val}' → '{new_val}'")
+        return "; ".join(diffs) if diffs else "no changes"
 
     def to_prompt(self) -> str:
         """Format observation as compact text for the planner."""
@@ -28,6 +54,8 @@ class Observation:
             parts.append(f"url: {self.url}")
         if self.title:
             parts.append(f"title: {self.title}")
+        if self.changes:
+            parts.append(f"changes: {self.changes}")
         if self.visible_text:
             parts.append(f"visible_text: {self.visible_text[:800]}")
         if self.button_texts:
