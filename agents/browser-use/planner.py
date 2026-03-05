@@ -78,7 +78,7 @@ RULES:
 2. Use structural hints: hasCanvas → draw, hasDraggables → drag, hasShadowRoots → content may be hidden.
 3. For multi-field forms: fill each field separately using selector/placeholder/name to target, then submit ONLY after ALL fields filled.
 4. NEVER click decoy navigation buttons (Next, Continue, Proceed, Move On, Go Forward, Keep Going, Advance, Click Here, Next Step, Next Page, Next Section, Continue Reading, Continue Journey, Proceed Forward, Move On) unless the TASK specifically requires it.
-5. If HOOKS.stuck is true, your last N actions had no effect. Try a COMPLETELY DIFFERENT action type or target.
+5. If HOOKS.stuck is true, your last N actions had no effect. You MUST try a COMPLETELY DIFFERENT action type AND target. If HOOKS.try_these_buttons is provided, try clicking one of those. If HOOKS.DIVERSITY_OVERRIDE is present, you MUST follow it.
 6. If HOOKS.patterns_found has matches, consider whether they're relevant to your task. If HOOKS.suggested_action is provided and it matches your task goal, execute it.
 7. After clicking a button that should reveal content, CHECK the observation for new text/buttons before clicking again.
 8. READ THE OBSERVATION CAREFULLY. The visible_text, buttons, and aria_snapshot already contain page content. For information extraction tasks, accumulate data from observations across multiple scroll actions rather than using evaluate_js.
@@ -86,6 +86,7 @@ RULES:
 10. Use evaluate_js ONLY for interactions the other actions can't handle (complex widgets, hidden state). NEVER use it just to read text that's already in the observation.
 11. Signal done with success=true ONLY when you have completed the task objective. Include ALL requested information in the summary.
 12. Use input metadata (id, name, type) to target the right field — e.g., use selector "#password" or placeholder "Password" to distinguish fields.
+13. When content is hidden: try hover (reveals tooltips), evaluate_js to read data-* attributes and aria-labels, check shadow DOM roots, look inside iframes. Pages often hide information in element attributes rather than visible text.
 
 ACTIONS:
 - click: {text, times} — Click element by visible text

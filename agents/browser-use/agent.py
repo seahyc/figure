@@ -432,6 +432,7 @@ async def run_agent(
         stuck_detector = StuckDetector(threshold=stuck_threshold)
         prev_obs: Observation | None = None
         hook_results_text: str | None = None
+        recent_action_types: list[str] = []  # for diversity enforcement
 
         for step_num in range(1, max_steps + 1):
             step_start = time.time()
@@ -490,6 +491,21 @@ async def run_agent(
             except Exception as e:
                 print(f"    [hooks] Error: {e}")
                 hook_results_text = None
+
+            # Action diversity enforcement: when stuck and repeating, inject override
+            recent_action_types.append(action_type)
+            if len(recent_action_types) > 5:
+                recent_action_types = recent_action_types[-5:]
+            if hook_results_text and "stuck: true" in hook_results_text:
+                recent_set = set(recent_action_types[-5:])
+                all_types = {"click", "type", "fill_form", "hover", "scroll", "drag", "draw",
+                             "press_keys", "wait", "evaluate_js"}
+                untried = all_types - recent_set
+                if len(recent_set) <= 2 and untried:
+                    override = (f"\n  DIVERSITY_OVERRIDE: You have only used {recent_set} for the last "
+                                f"{len(recent_action_types)} steps. You MUST use one of these instead: "
+                                f"{sorted(untried)}")
+                    hook_results_text += override
 
             print(f"    → {result.get('detail', '')[:80]} ({plan_ms:.0f}ms plan, {exec_ms:.0f}ms exec)")
 
