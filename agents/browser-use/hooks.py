@@ -69,7 +69,9 @@ _PATTERN_SCAN_JS = r"""(patterns) => {
                 document.querySelectorAll('*').forEach(function(el) {
                     for (var j = 0; j < el.attributes.length; j++) {
                         var attr = el.attributes[j];
-                        // Scan ALL attributes — codes can hide in data-*, aria-*, style, etc.
+                        // Skip class/href/src — scan data-*, aria-*, style, title, alt, etc.
+                        if (attr.name === 'class' || attr.name === 'href' || attr.name === 'src' ||
+                            attr.name === 'srcset' || attr.name === 'action') continue;
                         text += ' ' + attr.value;
                     }
                 });
@@ -77,6 +79,10 @@ _PATTERN_SCAN_JS = r"""(patterns) => {
 
             var match;
             while ((match = re.exec(text)) !== null) {
+                // Filter out likely CSS false positives: all-digit codes from style values
+                var v = match[0];
+                var hasLetter = /[A-Z]/.test(v);
+                if (!hasLetter && src === 'data_attributes') continue;
                 results.push({name: pat.name, value: match[0], source: src});
             }
             re.lastIndex = 0;
