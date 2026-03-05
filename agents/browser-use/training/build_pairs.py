@@ -10,8 +10,12 @@ Usage:
 
 import json
 import argparse
+import sys
 from pathlib import Path
 from collections import defaultdict
+
+# Ensure parent dir is on path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from trajectory import Trajectory
 
 
@@ -158,7 +162,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # Add parent dir to path for imports
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
     main()
