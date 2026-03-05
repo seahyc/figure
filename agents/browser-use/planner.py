@@ -71,49 +71,46 @@ _RESPONSE_SCHEMA = {
 }
 
 
-_SYSTEM_PROMPT = """You are a browser automation agent. You observe web pages and decide what action to take next to accomplish the given task.
-
-INPUT: You receive:
-1. TASK: A description of what to accomplish
-2. OBSERVATION: Current page state (URL, visible text, buttons, inputs, structural features)
-3. HISTORY: Last few actions and their results
-
-OUTPUT: You return a JSON action to execute.
-
-AVAILABLE ACTIONS:
-- click: Click an element. params: {text: "button or element text", times: N}
-- type: Type into ONE input field. params: {text: "value to type", selector: "#id or css", placeholder: "placeholder text"}
-  Use selector (e.g. "#username", "input[name='email']") or placeholder to target specific fields.
-- fill_form: Fill ONE input field + optionally click a submit button. params: {value: "answer", expression: "math expr", placeholder: "hint", submit_button: "Submit"}
-  Only set submit_button AFTER all fields are filled.
-- hover: Hover to reveal content. params: {text: "element text", seconds: N}
-- scroll: Scroll page. params: {direction: "down"/"up", pixels: N}
-- drag: Drag elements to targets. params: {} (auto-detects sources/targets)
-- draw: Draw on canvas. params: {strokes: N, selector: "canvas"}
-- press_keys: Press keyboard keys. params: {keys: ["ArrowUp", "Enter", ...]}
-- wait: Wait for content. params: {seconds: N}
-- evaluate_js: Run JavaScript. params: {code: "..."}  (escape hatch for novel interactions)
-- done: Task complete. params: {summary: "result", success: true/false}
+_SYSTEM_PROMPT = """You are a browser automation agent. You observe a web page, decide one action, and execute it.
 
 RULES:
-1. Pick the simplest action that makes progress toward the task
-2. Use structural features as hints: hasCanvas → draw, hasDraggables → drag, etc.
-3. If an action failed, try a different approach — don't repeat the same failing action
-4. Use evaluate_js only as a last resort when standard actions can't accomplish the goal
-5. Call done when the task objective is achieved or clearly impossible
-6. Be precise with button/element text — match what's visible on the page
-7. For multi-field forms (login, registration, search): fill each field separately with type/fill_form using selector or placeholder to target each one, then click submit ONLY after ALL fields are filled
-8. Use input metadata from the observation (id, name, placeholder) to target the right field
-"""
+1. Pick the simplest action that makes progress toward the task.
+2. Use structural hints: hasCanvas → draw, hasDraggables → drag, hasShadowRoots → content may be hidden.
+3. For multi-field forms: fill each field separately using selector/placeholder/name to target, then submit ONLY after ALL fields filled.
+4. NEVER click decoy navigation buttons (Next, Continue, Proceed, Move On, Go Forward, Keep Going, Advance, Click Here, Next Step, Next Page, Next Section, Continue Reading, Continue Journey, Proceed Forward, Move On) unless the TASK specifically requires it.
+5. If HOOKS.stuck is true, your last N actions had no effect. Try a COMPLETELY DIFFERENT action type or target.
+6. If HOOKS.patterns_found has matches, consider whether they're relevant to your task. If HOOKS.suggested_action is provided and it matches your task goal, execute it.
+7. After clicking a button that should reveal content, CHECK the observation for new text before clicking again.
+8. For date pickers, dropdowns, and complex widgets: use evaluate_js to inspect the component structure first.
+9. When extracting information, use evaluate_js to read specific DOM content rather than relying only on visible_text.
+10. Signal done with success=true ONLY when you have completed the task objective and can report the requested information.
+11. Use input metadata (id, name, type) to target the right field — e.g., use selector "#password" or placeholder "Password" to distinguish fields.
+
+ACTIONS:
+- click: {text, times} — Click element by visible text
+- type: {text, selector, placeholder} — Type into ONE input field
+- fill_form: {value, expression, placeholder, submit_button} — Fill input + optionally submit
+- hover: {text, seconds} — Hover to reveal content
+- scroll: {direction, pixels} — Scroll up/down
+- drag: {} — Auto-detect and drag elements to targets
+- draw: {strokes, selector} — Draw on canvas
+- press_keys: {keys} — Press keyboard keys (e.g. ["ArrowUp", "Enter"])
+- wait: {seconds} — Wait for content to load
+- evaluate_js: {code} — Run JavaScript (escape hatch for novel interactions)
+- done: {summary, success} — Task complete
+
+Output JSON: {"thought": "...", "action_type": "...", "params": {...}}"""
 
 
-async def plan(observation_text: str, task: str, history: list[dict] | None = None) -> dict:
+async def plan(observation_text: str, task: str, history: list[dict] | None = None,
+               hook_results: str | None = None) -> dict:
     """Plan the next action given the current observation and task.
 
     Args:
         observation_text: Formatted observation from observer.observe().to_prompt()
         task: Natural language task description
         history: List of recent {action, result} dicts (last 3-5)
+        hook_results: Formatted hook results string from HookResults.to_prompt()
 
     Returns:
         Dict with thought, action_type, params
@@ -132,23 +129,34 @@ async def plan(observation_text: str, task: str, history: list[dict] | None = No
             history_lines.append(f"  - {action} → {str(result)[:100]}")
         parts.append(f"HISTORY (last {len(history_lines)} actions):\n" + "\n".join(history_lines))
     parts.append(f"OBSERVATION:\n{observation_text}")
+    if hook_results:
+        parts.append(hook_results)
 
     user_msg = "\n\n".join(parts)
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=user_msg,
-            config=types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
-                response_mime_type="application/json",
-                response_schema=_RESPONSE_SCHEMA,
-                temperature=0.1,
-                max_output_tokens=500,
-            ),
-        )
-        result = json.loads(response.text)
-        return result
-    except Exception as e:
-        print(f"    [planner] Error: {e}")
-        return {"thought": f"Planning failed: {e}", "action_type": "wait", "params": {"seconds": 2}}
+    # Retry with exponential backoff on 429
+    for attempt in range(4):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=user_msg,
+                config=types.GenerateContentConfig(
+                    system_instruction=_SYSTEM_PROMPT,
+                    response_mime_type="application/json",
+                    response_schema=_RESPONSE_SCHEMA,
+                    temperature=0.1,
+                    max_output_tokens=500,
+                ),
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                if attempt < 3:
+                    wait = [5, 10, 20][min(attempt, 2)]
+                    print(f"    [planner] Rate limited, waiting {wait}s (attempt {attempt+1}/3)")
+                    import asyncio
+                    await asyncio.sleep(wait)
+                    continue
+            print(f"    [planner] Error: {e}")
+            return {"thought": f"Planning failed: {e}", "action_type": "wait", "params": {"seconds": 2}}
