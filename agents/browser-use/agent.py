@@ -619,7 +619,7 @@ async def main():
         description="Figure Agent — General-Purpose Browser Automation",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--url", required=True, help="Starting URL")
+    parser.add_argument("--url", help="Starting URL (required unless --task-file provides it)")
 
     goal_group = parser.add_mutually_exclusive_group(required=False)
     goal_group.add_argument("--goal", help="Goal to accomplish (natural language)")
@@ -648,7 +648,7 @@ async def main():
             goal = f.read().strip()
 
     task_id = ""
-    url = args.url
+    url = args.url or ""
     reward_type = args.reward
     reward_pattern = args.reward_pattern
 
@@ -677,6 +677,8 @@ async def main():
     if args.scan_pattern and not scan_patterns:
         scan_patterns = [{"name": "match", "regex": args.scan_pattern, "source": "all"}]
 
+    if not url:
+        parser.error("--url is required (or provide --task-file with url)")
     if not goal:
         parser.error("Either --goal, --goal-file, or --task-file with description is required")
 

@@ -137,6 +137,13 @@ _FIND_ELEMENT_JS = r"""(text) => {
 # Action Handlers
 # ══════════════════════════════════════════════════════════════════════════════
 
+_DECOY_BUTTONS = frozenset([
+    "next", "continue", "proceed", "move on", "go forward", "keep going",
+    "advance", "click here", "next step", "next page", "next section",
+    "continue reading", "continue journey", "proceed forward",
+])
+
+
 async def execute_click(page, params: dict) -> dict:
     """Click element(s) matching text. Uses React onClick dispatch for React elements,
     Playwright trusted click for non-React elements."""
@@ -144,6 +151,10 @@ async def execute_click(page, params: dict) -> dict:
     times = params.get("times", 1)
     if not text:
         return {"ok": False, "detail": "no click target text provided"}
+
+    # Block known decoy navigation buttons
+    if text.lower().strip().rstrip(":") in _DECOY_BUTTONS:
+        return {"ok": False, "detail": f"BLOCKED: '{text}' is a decoy navigation button. Try a different action."}
 
     mouse = await _get_mouse(page)
     clicked = 0
@@ -301,9 +312,9 @@ async def execute_type(page, params: dict) -> dict:
                     }
                 }
             }
-            // Strategy 3: first visible text input
+            // Strategy 3: first visible text/password/email input
             if (!input) {
-                var inputs = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type]), textarea');
+                var inputs = document.querySelectorAll('input[type="text"], input[type="password"], input[type="email"], input[type="search"], input:not([type]), textarea');
                 for (var i = 0; i < inputs.length; i++) {
                     if (inputs[i].offsetWidth > 0 && inputs[i].offsetHeight > 0) {
                         input = inputs[i]; break;
@@ -393,12 +404,16 @@ async def execute_fill_form(page, params: dict) -> dict:
             }
         }
         if (!input) {
-            var inputs = document.querySelectorAll('input[type="text"], input[type="number"], input[type="tel"], input:not([type]), textarea');
+            var inputs = document.querySelectorAll('input[type="text"], input[type="password"], input[type="email"], input[type="number"], input[type="tel"], input:not([type]), textarea');
+            // Prefer empty inputs (for multi-field forms)
+            var firstVisible = null;
             for (var i = 0; i < inputs.length; i++) {
                 var inp = inputs[i];
                 if (inp.offsetWidth === 0 || inp.offsetHeight === 0) continue;
-                input = inp; break;
+                if (!firstVisible) firstVisible = inp;
+                if (!inp.value || inp.value.trim() === '') { input = inp; break; }
             }
+            if (!input) input = firstVisible;
         }
         if (!input) return JSON.stringify({ok: false, reason: 'no input found'});
 
@@ -431,10 +446,24 @@ async def execute_fill_form(page, params: dict) -> dict:
     # Click submit button if specified
     detail = f"filled '{value}'"
     if submit_btn:
-        await asyncio.sleep(0.2)
-        btn_result = await execute_click(page, {"text": submit_btn})
-        if btn_result.get("ok"):
-            detail += f", clicked '{submit_btn}'"
+        # Smart submit: check if other visible inputs are still empty
+        empty_count = await page.evaluate(r"""() => {
+            var count = 0;
+            var inputs = document.querySelectorAll('input[type="text"], input[type="password"], input[type="email"], input:not([type]), textarea');
+            for (var i = 0; i < inputs.length; i++) {
+                var inp = inputs[i];
+                if (inp.offsetWidth === 0 || inp.offsetHeight === 0) continue;
+                if (!inp.value || inp.value.trim() === '') count++;
+            }
+            return count;
+        }""")
+        if empty_count and int(empty_count) > 0:
+            detail += f" (skipped submit: {empty_count} empty input(s) remaining)"
+        else:
+            await asyncio.sleep(0.2)
+            btn_result = await execute_click(page, {"text": submit_btn})
+            if btn_result.get("ok"):
+                detail += f", clicked '{submit_btn}'"
 
     return {"ok": True, "detail": detail}
 

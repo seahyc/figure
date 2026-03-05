@@ -17,6 +17,7 @@ class HookResults:
     popups_dismissed: int = 0
     stuck: bool = False
     same_state_for: int = 0
+    alternative_buttons: list[str] = field(default_factory=list)
 
     def to_prompt(self) -> str:
         """Format hook results for planner input."""
@@ -29,6 +30,8 @@ class HookResults:
             lines.append(f"  popups_dismissed: {self.popups_dismissed}")
         if self.stuck:
             lines.append(f"  stuck: true (same page state for {self.same_state_for} steps)")
+            if self.alternative_buttons:
+                lines.append(f"  try_these_buttons: {self.alternative_buttons}")
         if not self.patterns_found and not self.stuck and self.popups_dismissed == 0:
             lines.append("  (no signals)")
         return "\n".join(lines)
@@ -242,5 +245,29 @@ async def run_hooks(
         stuck_result = stuck_detector.check(url, visible_text)
         results.stuck = stuck_result["stuck"]
         results.same_state_for = stuck_result["same_state_for"]
+
+        # When stuck, find non-decoy buttons as recovery suggestions
+        if results.stuck:
+            try:
+                alt_btns = await page.evaluate(r"""() => {
+                    var DECOY = ['next','continue','proceed','advance','move on','go forward',
+                                 'keep going','click here','next step','next page','next section',
+                                 'continue reading','continue journey','proceed forward',
+                                 'dismiss','close','accept','decline','ok','got it'];
+                    var good = [];
+                    var btns = document.querySelectorAll('button, [role="button"]');
+                    for (var i = 0; i < btns.length; i++) {
+                        var t = btns[i].textContent.trim();
+                        if (!t || t.length > 50 || btns[i].offsetWidth === 0) continue;
+                        if (DECOY.indexOf(t.toLowerCase()) === -1 && t !== 'Submit Code') {
+                            good.push(t);
+                        }
+                    }
+                    // Deduplicate
+                    return [...new Set(good)].slice(0, 5);
+                }""")
+                results.alternative_buttons = alt_btns or []
+            except Exception:
+                pass
 
     return results

@@ -1,0 +1,23 @@
+id: challenge-30step
+url: https://serene-frangipane-7fd25b.netlify.app/
+description: |
+  Complete all 30 steps of the browser challenge. Each step presents a different
+  interaction puzzle (clicking, hovering, dragging, drawing on canvas, keyboard
+  sequences, scrolling, shadow DOM, iframes, math problems, and more).
+
+  After solving each puzzle, a 6-character alphanumeric code appears somewhere on
+  the page. Find it, enter it in the code input field, and click "Submit Code" to
+  advance to the next step.
+
+  IMPORTANT: Do NOT click decoy navigation buttons (Next, Continue, Proceed, etc).
+  Only "Submit Code" advances steps. The code uses characters A-HJ-NP-Z2-9
+  (no I, O, 0, 1).
+reward_type: progress
+reward_pattern: "Step\\s+(\\d+)"
+scan_patterns:
+  - name: code
+    regex: "[A-HJ-NP-Z2-9]{6}"
+    source: all
+hooks:
+  dismiss_popups: true
+  stuck_threshold: 3

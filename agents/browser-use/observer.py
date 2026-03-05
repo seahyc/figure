@@ -94,14 +94,21 @@ _PAGE_SCAN_JS = r"""() => {
     // Visible text — first 800 chars of body text
     result.visibleText = document.body ? document.body.innerText.substring(0, 800) : '';
 
-    // Collect visible button texts
+    // Collect visible button texts — prioritize non-decoy buttons
     var btns = document.querySelectorAll('button, [role="button"], a[href]');
-    var uniqueBtnTexts = new Set();
-    for (var i = 0; i < btns.length && uniqueBtnTexts.size < 20; i++) {
+    var DECOY = ['next','continue','proceed','advance','move on','go forward','keep going',
+                 'click here','next step','next page','next section','continue reading',
+                 'continue journey','proceed forward','move on'];
+    var primary = new Set();
+    var decoy = new Set();
+    for (var i = 0; i < btns.length; i++) {
         var t = btns[i].textContent.trim();
-        if (t && isVis(btns[i]) && !btns[i].disabled && t.length < 50) uniqueBtnTexts.add(t);
+        if (!t || !isVis(btns[i]) || btns[i].disabled || t.length > 50) continue;
+        if (DECOY.indexOf(t.toLowerCase()) !== -1) { decoy.add(t); }
+        else { primary.add(t); }
+        if (primary.size + decoy.size >= 40) break;
     }
-    result.buttonTexts = Array.from(uniqueBtnTexts);
+    result.buttonTexts = Array.from(primary).concat(Array.from(decoy).slice(0, 5));
 
     // Collect input fields with metadata
     var inputs = document.querySelectorAll('input, textarea, select');
