@@ -32,6 +32,7 @@ from planner import plan
 from executor import execute, ACTION_HANDLERS
 from trajectory import Trajectory, TrajectoryStep
 from reward import create_reward, RewardFunction, ProgressReward
+from hooks import run_hooks, StuckDetector, HookResults
 
 load_dotenv()
 
@@ -356,6 +357,9 @@ async def run_agent(
     reward_pattern: str = r"Step\s+(\d+)",
     task_id: str = "",
     save_trajectory: bool = True,
+    scan_patterns: list[dict] | None = None,
+    dismiss_popups: bool = True,
+    stuck_threshold: int = 5,
 ):
     """Run the general-purpose browser agent.
 
@@ -369,6 +373,9 @@ async def run_agent(
         reward_pattern: Regex for progress reward
         task_id: Task identifier for trajectory logging
         save_trajectory: Whether to save trajectory JSONL
+        scan_patterns: List of {name, regex, source} dicts for pattern scanning
+        dismiss_popups: Whether to auto-dismiss cookie/consent popups
+        stuck_threshold: Steps with same state before flagging stuck
     """
     print(f"\n{'='*60}")
     print(f"Figure Agent — General-Purpose Browser Automation")
@@ -422,6 +429,9 @@ async def run_agent(
         success = False
 
         t0 = time.time()
+        stuck_detector = StuckDetector(threshold=stuck_threshold)
+        prev_obs: Observation | None = None
+        hook_results_text: str | None = None
 
         for step_num in range(1, max_steps + 1):
             step_start = time.time()
@@ -429,15 +439,20 @@ async def run_agent(
             # 1. OBSERVE
             try:
                 obs = await observe(page)
+                # Compute observation diff
+                if prev_obs:
+                    obs.changes = obs.diff_from(prev_obs)
+                prev_obs = obs
                 obs_text = obs.to_prompt()
             except Exception as e:
                 print(f"  [Step {step_num}] Observe error: {e}")
                 obs_text = f"url: {url}\nerror: {e}"
+                obs = Observation()
 
             # 2. PLAN
             plan_start = time.time()
             try:
-                action = await plan(obs_text, goal, history[-5:])
+                action = await plan(obs_text, goal, history[-5:], hook_results=hook_results_text)
             except Exception as e:
                 print(f"  [Step {step_num}] Plan error: {e}")
                 action = {"thought": f"Plan failed: {e}", "action_type": "wait", "params": {"seconds": 2}}
@@ -456,6 +471,25 @@ async def run_agent(
             except Exception as e:
                 result = {"ok": False, "detail": f"execution error: {e}"}
             exec_ms = (time.time() - exec_start) * 1000
+
+            # 3.5. RUN HOOKS
+            try:
+                hook_res = await run_hooks(
+                    page,
+                    url=obs.url,
+                    visible_text=obs.visible_text,
+                    scan_patterns=scan_patterns,
+                    dismiss_popups=dismiss_popups,
+                    stuck_detector=stuck_detector,
+                )
+                hook_results_text = hook_res.to_prompt() if (hook_res.patterns_found or hook_res.stuck or hook_res.popups_dismissed > 0) else None
+                if hook_res.patterns_found:
+                    print(f"    [hooks] Patterns found: {[p['value'] for p in hook_res.patterns_found]}")
+                if hook_res.stuck:
+                    print(f"    [hooks] STUCK: same state for {hook_res.same_state_for} steps")
+            except Exception as e:
+                print(f"    [hooks] Error: {e}")
+                hook_results_text = None
 
             print(f"    → {result.get('detail', '')[:80]} ({plan_ms:.0f}ms plan, {exec_ms:.0f}ms exec)")
 
@@ -603,6 +637,7 @@ async def main():
                         help="Regex pattern for progress reward")
     parser.add_argument("--no-trajectory", action="store_true",
                         help="Disable trajectory logging")
+    parser.add_argument("--scan-pattern", help="Ad-hoc regex pattern to scan for after each action")
 
     args = parser.parse_args()
 
@@ -628,6 +663,19 @@ async def main():
         task_id = task_def.get("id", "")
         reward_type = task_def.get("reward_type", reward_type)
         reward_pattern = task_def.get("reward_pattern", reward_pattern)
+        scan_patterns = task_def.get("scan_patterns")
+        hooks_cfg = task_def.get("hooks", {})
+        dismiss_popups_flag = hooks_cfg.get("dismiss_popups", True)
+        stuck_threshold = hooks_cfg.get("stuck_threshold", 5)
+
+    # Hook config defaults
+    if not args.task_file:
+        scan_patterns = None
+        dismiss_popups_flag = True
+        stuck_threshold = 5
+
+    if args.scan_pattern and not scan_patterns:
+        scan_patterns = [{"name": "match", "regex": args.scan_pattern, "source": "all"}]
 
     if not goal:
         parser.error("Either --goal, --goal-file, or --task-file with description is required")
@@ -642,6 +690,9 @@ async def main():
         reward_pattern=reward_pattern,
         task_id=task_id,
         save_trajectory=not args.no_trajectory,
+        scan_patterns=scan_patterns,
+        dismiss_popups=dismiss_popups_flag,
+        stuck_threshold=stuck_threshold,
     )
 
 
