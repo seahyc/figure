@@ -10,6 +10,13 @@
     from now. Report price, airline, dates, and layover city.
   reward_type: llm_judge
   expected_criteria: "Plausible price + airline + route for PEK-SIN"
+  scan_patterns:
+    - name: price
+      regex: "\\$[\\d,]+"
+      source: visible_text
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: hotel-comparison
   url: https://www.booking.com
@@ -19,6 +26,9 @@
     rating, and distance from Tokyo Station.
   reward_type: llm_judge
   expected_criteria: "Real hotel with plausible price in Tokyo"
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: product-research
   url: https://www.amazon.com
@@ -28,6 +38,13 @@
     and battery life for each.
   reward_type: llm_judge
   expected_criteria: "3 real products with specs"
+  scan_patterns:
+    - name: price
+      regex: "\\$[\\d,]+\\.\\d{2}"
+      source: visible_text
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: recipe-search
   url: https://www.allrecipes.com
@@ -37,6 +54,9 @@
     time, ingredients count, and rating.
   reward_type: llm_judge
   expected_criteria: "Real recipe matching constraints"
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: news-extraction
   url: https://www.bbc.com/news
@@ -45,6 +65,9 @@
     source, and a one-sentence summary.
   reward_type: llm_judge
   expected_criteria: "Real current headlines from BBC"
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: academic-search
   url: https://arxiv.org
@@ -53,6 +76,9 @@
     published in 2024 or 2025 on arXiv. Report the title, authors, and abstract.
   reward_type: llm_judge
   expected_criteria: "Real paper exists on arXiv"
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: job-market
   url: https://www.figure.ai/careers
@@ -61,6 +87,13 @@
     department and report the total count and the department with the most openings.
   reward_type: llm_judge
   expected_criteria: "Plausible count + departments"
+  scan_patterns:
+    - name: count
+      regex: "\\d+ open positions?"
+      source: visible_text
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: course-discovery
   url: https://www.coursera.org
@@ -70,6 +103,9 @@
     instructor, platform, duration, and rating.
   reward_type: llm_judge
   expected_criteria: "Real course matching constraints"
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: map-routing
   url: https://www.google.com/maps
@@ -79,6 +115,9 @@
     highway names.
   reward_type: llm_judge
   expected_criteria: "Plausible route + time (~30-40 min)"
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: math-computation
   url: https://www.wolframalpha.com
@@ -87,6 +126,9 @@
     Report the exact symbolic result and the numerical approximation.
   reward_type: llm_judge
   expected_criteria: "Numerical result approximately 12.0703"
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 5
 
 - id: challenge-30step
   url: https://serene-frangipane-7fd25b.netlify.app/
@@ -104,3 +146,10 @@
     (no I, O, 0, 1).
   reward_type: progress
   reward_pattern: "Step\\s+(\\d+)"
+  scan_patterns:
+    - name: code
+      regex: "[A-HJ-NP-Z2-9]{6}"
+      source: all
+  hooks:
+    dismiss_popups: true
+    stuck_threshold: 3
