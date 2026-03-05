@@ -77,7 +77,7 @@ RULES:
 1. Pick the simplest action that makes progress toward the task.
 2. Use structural hints: hasCanvas → draw, hasDraggables → drag, hasShadowRoots → content may be hidden.
 3. For multi-field forms: fill each field separately using selector/placeholder/name to target, then submit ONLY after ALL fields filled.
-4. NEVER click decoy navigation buttons (Next, Continue, Proceed, Move On, Go Forward, Keep Going, Advance, Click Here, Next Step, Next Page, Next Section, Continue Reading, Continue Journey, Proceed Forward, Move On) unless the TASK specifically requires it.
+4. NEVER click decoy navigation buttons (Next, Continue, Proceed, Move On, Go Forward, Keep Going, Advance, Next Step, Next Page, Next Section, Continue Reading, Continue Journey, Proceed Forward) unless the TASK specifically requires it.
 5. If HOOKS.stuck is true, your last N actions had no effect. You MUST try a COMPLETELY DIFFERENT action type AND target. If HOOKS.try_these_buttons is provided, try clicking one of those. If HOOKS.DIVERSITY_OVERRIDE is present, you MUST follow it.
 6. If HOOKS.patterns_found has matches, consider whether they're relevant to your task. If HOOKS.suggested_action is provided and it matches your task goal, execute it.
 7. After clicking a button that should reveal content, CHECK the observation for new text/buttons before clicking again.

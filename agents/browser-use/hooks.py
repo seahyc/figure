@@ -69,10 +69,8 @@ _PATTERN_SCAN_JS = r"""(patterns) => {
                 document.querySelectorAll('*').forEach(function(el) {
                     for (var j = 0; j < el.attributes.length; j++) {
                         var attr = el.attributes[j];
-                        if (attr.name.indexOf('data-') === 0 || attr.name === 'aria-label' ||
-                            attr.name === 'title' || attr.name === 'alt') {
-                            text += ' ' + attr.value;
-                        }
+                        // Scan ALL attributes — codes can hide in data-*, aria-*, style, etc.
+                        text += ' ' + attr.value;
                     }
                 });
             }
