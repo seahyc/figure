@@ -57,7 +57,7 @@ class Observation:
         if self.changes:
             parts.append(f"changes: {self.changes}")
         if self.visible_text:
-            parts.append(f"visible_text: {self.visible_text[:800]}")
+            parts.append(f"visible_text: {self.visible_text[:2000]}")
         if self.button_texts:
             parts.append(f"buttons: {self.button_texts}")
         if self.input_fields:
@@ -68,7 +68,7 @@ class Observation:
             if feats:
                 parts.append(f"features: {feats}")
         if self.aria_snapshot:
-            parts.append(f"aria_snapshot:\n{self.aria_snapshot[:1500]}")
+            parts.append(f"aria_snapshot:\n{self.aria_snapshot[:2500]}")
         return "\n".join(parts)
 
 
@@ -92,7 +92,7 @@ _PAGE_SCAN_JS = r"""() => {
     };
 
     // Visible text — first 800 chars of body text
-    result.visibleText = document.body ? document.body.innerText.substring(0, 800) : '';
+    result.visibleText = document.body ? document.body.innerText.substring(0, 2000) : '';
 
     // Collect visible button texts — prioritize non-decoy buttons
     var btns = document.querySelectorAll('button, [role="button"], a[href]');
@@ -189,7 +189,7 @@ async def observe(page) -> Observation:
             var lines = [];
             var walk = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
             var count = 0;
-            while (walk.nextNode() && count < 200) {
+            while (walk.nextNode() && count < 400) {
                 var el = walk.currentNode;
                 var role = el.getAttribute('role') || el.tagName.toLowerCase();
                 var label = el.getAttribute('aria-label') || el.getAttribute('alt') || '';

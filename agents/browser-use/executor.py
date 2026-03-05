@@ -137,13 +137,6 @@ _FIND_ELEMENT_JS = r"""(text) => {
 # Action Handlers
 # ══════════════════════════════════════════════════════════════════════════════
 
-_DECOY_BUTTONS = frozenset([
-    "next", "continue", "proceed", "move on", "go forward", "keep going",
-    "advance", "click here", "next step", "next page", "next section",
-    "continue reading", "continue journey", "proceed forward",
-])
-
-
 async def execute_click(page, params: dict) -> dict:
     """Click element(s) matching text. Uses React onClick dispatch for React elements,
     Playwright trusted click for non-React elements."""
@@ -151,10 +144,6 @@ async def execute_click(page, params: dict) -> dict:
     times = params.get("times", 1)
     if not text:
         return {"ok": False, "detail": "no click target text provided"}
-
-    # Block known decoy navigation buttons
-    if text.lower().strip().rstrip(":") in _DECOY_BUTTONS:
-        return {"ok": False, "detail": f"BLOCKED: '{text}' is a decoy navigation button. Try a different action."}
 
     mouse = await _get_mouse(page)
     clicked = 0

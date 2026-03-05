@@ -80,11 +80,12 @@ RULES:
 4. NEVER click decoy navigation buttons (Next, Continue, Proceed, Move On, Go Forward, Keep Going, Advance, Click Here, Next Step, Next Page, Next Section, Continue Reading, Continue Journey, Proceed Forward, Move On) unless the TASK specifically requires it.
 5. If HOOKS.stuck is true, your last N actions had no effect. Try a COMPLETELY DIFFERENT action type or target.
 6. If HOOKS.patterns_found has matches, consider whether they're relevant to your task. If HOOKS.suggested_action is provided and it matches your task goal, execute it.
-7. After clicking a button that should reveal content, CHECK the observation for new text before clicking again.
-8. For date pickers, dropdowns, and complex widgets: use evaluate_js to inspect the component structure first.
-9. When extracting information, use evaluate_js to read specific DOM content rather than relying only on visible_text.
-10. Signal done with success=true ONLY when you have completed the task objective and can report the requested information.
-11. Use input metadata (id, name, type) to target the right field — e.g., use selector "#password" or placeholder "Password" to distinguish fields.
+7. After clicking a button that should reveal content, CHECK the observation for new text/buttons before clicking again.
+8. READ THE OBSERVATION CAREFULLY. The visible_text, buttons, and aria_snapshot already contain page content. For information extraction tasks, accumulate data from observations across multiple scroll actions rather than using evaluate_js.
+9. For long pages: scroll down, read new content from each observation, and build up your answer progressively. Use done with summary once you've seen the whole page.
+10. Use evaluate_js ONLY for interactions the other actions can't handle (complex widgets, hidden state). NEVER use it just to read text that's already in the observation.
+11. Signal done with success=true ONLY when you have completed the task objective. Include ALL requested information in the summary.
+12. Use input metadata (id, name, type) to target the right field — e.g., use selector "#password" or placeholder "Password" to distinguish fields.
 
 ACTIONS:
 - click: {text, times} — Click element by visible text
